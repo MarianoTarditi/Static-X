@@ -1,0 +1,22 @@
+# Build outputs and IDE state
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+
+# Local tools and generated indexes
+.atl/
+.codegraph/
+
+# Machine-specific configuration and secrets
+Static-X/appsettings.json
+Static-X/appsettings.Development.json
+**/appsettings.Local.json
+**/appsettings.*.local.json
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
