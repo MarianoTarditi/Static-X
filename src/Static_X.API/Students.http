@@ -1,0 +1,67 @@
+@baseUrl = https://localhost:7226
+
+### First log in with a confirmed GymAdmin or Trainer using Account.http.
+### Keep the same cookie session. Fetch a NEW CSRF token after login.
+GET {{baseUrl}}/api/account/csrf
+
+### Create a ficha only (201 + Location); no account, invitation, or email is created.
+### Gym ownership comes from the session, never from the request body.
+POST {{baseUrl}}/api/students
+Content-Type: application/json
+X-CSRF-TOKEN: <token-from-post-login-csrf-response>
+
+{
+  "nombre": "Ana",
+  "apellido": "Smith",
+  "email": "ana@example.com"
+}
+
+### List page 1 (default size 20), including inactive (200 object: items/page/pageSize/totalCount).
+### This replaces the former array contract. No CSRF header needed for GET.
+GET {{baseUrl}}/api/students
+
+### Literal substring search across nombre/apellido/email, combined with state and trusted session gym.
+### Search is trimmed, blank means no filter, maximum 320 raw characters. Defaults page=1/pageSize=20.
+GET {{baseUrl}}/api/students?page=1&pageSize=20&search=ana&activo=true
+
+### Next page; page must be positive and pageSize 1..100. Invalid bounds/overflow return 400.
+### Beyond the last page returns empty items with the same filtered totalCount.
+GET {{baseUrl}}/api/students?page=2&pageSize=20
+
+### Optional strict boolean state filter. Omit activo for all fichas; invalid bool returns 400.
+GET {{baseUrl}}/api/students?activo=true
+
+### Inactive fichas remain visible to direct lookup and can be edited without reactivation.
+GET {{baseUrl}}/api/students?activo=false
+
+### Find a ficha (200); replace 1 with the created id or follow Location.
+GET {{baseUrl}}/api/students/1
+
+### Missing and cross-gym fichas return the same 404. Nonpositive ids return 400.
+GET {{baseUrl}}/api/students/2147483647
+
+### Edit an existing ficha (200); replace 1 with an id from this session's gym.
+### All three fields are required. No account, role, password, or ownership changes.
+PUT {{baseUrl}}/api/students/1
+Content-Type: application/json
+X-CSRF-TOKEN: <token-from-post-login-csrf-response>
+
+{
+  "nombre": "Ana Maria",
+  "apellido": "Smith",
+  "email": "ana.maria@example.com"
+}
+
+### All endpoints require login (401) and GymAdmin or Trainer (Student receives 403).
+### Invalid/blank fields, invalid email, or email over 320 trimmed characters: 400.
+### Email is trimmed and uppercased; duplicate within this gym: 409 ProblemDetails.
+### The same email in another gym is allowed. All student responses use no-store.
+
+### Deactivate logically (200 updated ficha with activo=false). No body; CSRF is still required.
+### Both GymAdmin and Trainer can use both actions. Repeating either action is idempotent.
+PATCH {{baseUrl}}/api/students/1/deactivate
+X-CSRF-TOKEN: <token-from-post-login-csrf-response>
+
+### Reactivate (200 updated ficha with activo=true). No account/login changes.
+PATCH {{baseUrl}}/api/students/1/reactivate
+X-CSRF-TOKEN: <token-from-post-login-csrf-response>

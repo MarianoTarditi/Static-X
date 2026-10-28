@@ -4,7 +4,7 @@
 
 Actuá como un desarrollador senior de backend especializado en C#, .NET, ASP.NET Core y bases de datos relacionales. Diseñá e implementá soluciones claras, mantenibles, seguras y fáciles de probar. Aplicá buenas prácticas con criterio: cada abstracción debe resolver una necesidad concreta y cada decisión debe ser proporcional al tamaño y complejidad del proyecto.
 
-La arquitectura elegida es una **arquitectura en capas**, organizada en cuatro proyectos: **API, BLL, DAL y ENTITY**. Respetá esta estructura. No la reemplaces por Clean Architecture, Onion, microservicios o CQRS sin una decisión explícita del equipo.
+La arquitectura autorizada es una **arquitectura tradicional de cuatro proyectos físicos**, **API, BLL, DAL y Entity**, bajo `src/Static_X.*`, con pruebas en `tests/Static_X.Tests` y una única solución activa `Static-X.sln`. Esta decisión explícita reemplaza la organización anterior de carpetas en un solo proyecto. No se debe cambiar esta arquitectura sin autorización independiente. Consulte el [mapa físico y las decisiones de compatibilidad](BackendArchitecture.md).
 
 El frontend puede estar desarrollado en React y se comunica con el backend mediante HTTP y JSON. El backend expone una API; no necesita vistas Razor para atender al frontend.
 
@@ -14,13 +14,13 @@ El frontend puede estar desarrollado en React y se comunica con el backend media
 
 Definí las entidades, enumeraciones y tipos que representan los conceptos del sistema. Las entidades pueden encapsular reglas e invariantes propias de su estado cuando corresponda, mientras que BLL coordina las operaciones de negocio.
 
-Mantené este proyecto independiente de API, BLL y DAL. Evitá dependencias de ASP.NET Core y detalles de persistencia. Preferí configurar Entity Framework Core mediante Fluent API en DAL, sin introducir atributos de persistencia innecesarios en las entidades.
+Mantenga Entity independiente de los proyectos API, BLL y DAL. `Account` y `AccountRole` son modelos puros del dominio. Por decisión explícita, `GymAccount : IdentityUser` también pertenece a Entity y conserva su herencia y comportamiento de autenticación: es una excepción deliberada a la independencia de frameworks, mediante `Microsoft.AspNetCore.App`. No se autoriza introducir EF Core, contratos HTTP ni proveedores externos en Entity. `ActivationDelivery` es un tipo de entrega no persistido. Configure EF Core mediante Fluent API en DAL sin introducir atributos de persistencia innecesarios en las entidades.
 
 No uses ENTITY como una carpeta genérica para cualquier clase compartida. Los contratos de entrada y salida de la API deben estar separados de las entidades persistidas.
 
 ### DAL: acceso a datos
 
-Concentrá aquí el `DbContext`, las configuraciones de entidades, las migraciones y las implementaciones de repositorios cuando estos aporten una separación útil. En esta arquitectura, ubicá también las interfaces de esos repositorios en DAL, para que BLL pueda consumirlas sin depender de clases concretas.
+Concentre `StaticXDbContext`, las configuraciones y las migraciones en `src/Static_X.DAL/Persistence`; mantenga `ActivationOutbox` en `Persistence/Models` como modelo exclusivo de persistencia. Los repositorios se ubican en `Repositories/Implementations`, con sus contratos en `Repositories/Interfaces`. BLL consume estas interfaces. Mantenga los proveedores de correo externos en API, no en DAL.
 
 DAL debe encargarse de consultar y persistir información. No debe decidir permisos funcionales, calcular reglas comerciales ni generar respuestas HTTP. Una restricción de integridad en la base de datos complementa las reglas de negocio y protege frente a operaciones concurrentes.
 
@@ -28,17 +28,19 @@ Evitá devolver `IQueryable` fuera de DAL. Ofrecé métodos con una intención c
 
 ### BLL: lógica de negocio
 
-Implementá los servicios que coordinan los casos de uso. Esta capa valida reglas de negocio, comprueba condiciones de las operaciones y utiliza las abstracciones de DAL para consultar o persistir datos.
+Implemente los servicios que coordinan los casos de uso. Esta capa valida reglas de negocio y comprueba condiciones de las operaciones. Para consultar o persistir utiliza interfaces de repositorio de DAL; los contratos de entrega externa permanecen en `src/Static_X.BLL/Interfaces`.
 
-Organizá los servicios por responsabilidad funcional. Evitá clases que concentren todas las operaciones del sistema. Definí sus interfaces en BLL y utilizá inyección por constructor para recibir dependencias.
+Organice los cinco servicios existentes en `src/Static_X.BLL/Services` y todos sus contratos en `Interfaces`, incluido `IActivationEmailSender`. No agregue carpetas de Identity, nuevos servicios ni divisiones innecesarias. Utilice inyección por constructor y registre los servicios mediante sus interfaces. No implemente clientes de proveedores externos en BLL.
 
 BLL no debe conocer `HttpContext`, controladores, códigos HTTP, `IActionResult` ni `ProblemDetails`. Tampoco debe ejecutar SQL o acceder directamente al `DbContext`: esas operaciones corresponden a DAL.
 
-Los DTO de los casos de uso pueden ubicarse en BLL. Si una solicitud o respuesta tiene características exclusivas del transporte HTTP, definí ese contrato en API y realizá el mapeo correspondiente. No agregues un proyecto de contratos adicional salvo que exista una necesidad real.
+Por decisión explícita, todos los DTO específicos de entrada y salida HTTP o de negocio pertenecen a BLL, en `DTOs/{Accounts,Activations,Gyms,Students}`, junto a `Interfaces` y `Services`. Utilice una clase convencional por archivo, con propiedades y constructores explícitos; conserve JSON, atributos de validación, valores predeterminados y nulabilidad. Los contratos públicos de servicios de negocio aplicables reciben DTO para grupos de campos y devuelven DTO, nunca entidades, incluso en colecciones o resultados anidados. BLL realiza el mapeo de entidades a DTO y valida el negocio sin depender de MVC. Mantenga separados los identificadores confiables de gimnasio y destino, los roles autorizados y la cancelación; ningún campo del cliente acredita pertenencia ni permisos. No envuelva artificialmente identificadores simples, enumeraciones, resultados escalares ni operaciones que solo reciben cancelación. API ejecuta la validación HTTP y traduce estados, pero no mapea entidades de negocio. Los errores del framework, las entidades, el payload interno `ActivationDelivery` y los comandos internos del analizador CLI conservan su ubicación; DAL mantiene contratos basados en entidades y no debe depender de DTO de BLL. No agregue contratos sin uso ni otro proyecto.
+
+Por decisión explícita, BLL utiliza perfiles de AutoMapper en `Mappings`, separados por responsabilidad. Configure los parámetros de los constructores de los DTO y convierta los resultados persistidos, no los datos de entrada pendientes de guardar. Mantenga validación, normalización, autorización y selección confiable de gimnasio y rol fuera de los perfiles. Registre AutoMapper una sola vez en la composición de API, explorando únicamente el ensamblado BLL. No agregue mapas inversos automáticos, mapas de credenciales de Identity ni dependencias de AutoMapper en DAL o Entity. Consulte la [configuración operativa y licencia](BackendArchitecture.md#automapper-response-mapping).
 
 ### API: presentación HTTP y configuración
 
-Implementá los controladores, contratos HTTP específicos, autenticación, políticas de autorización, middleware, documentación y configuración de dependencias.
+Implemente los controladores, validación y traducción de estados HTTP, autenticación, políticas de autorización, middleware, documentación y composición en `src/Static_X.API`; los DTO específicos y el mapeo de entidades de negocio pertenecen a BLL. La autenticación, Identity y la composición pueden utilizar legítimamente `GymAccount` y enumeraciones de roles, sin habilitar mapeos de entidades de negocio en controladores. Ubique autenticación en `Auth`, comandos operativos en `CLI` y adaptadores externos como Resend en `Integrations/Email`.
 
 Mantené los controladores breves: reciben la solicitud, verifican sus condiciones de transporte, delegan en BLL y traducen el resultado a una respuesta HTTP coherente. No accedas a repositorios o al `DbContext` desde un controlador.
 
@@ -46,16 +48,16 @@ Usá `Program.cs`, o extensiones de registro invocadas desde él, como punto de 
 
 ## Dependencias permitidas
 
-| Proyecto | Referencias permitidas |
+| Proyecto | Dependencias permitidas |
 | --- | --- |
-| ENTITY | Ninguno de los otros proyectos. |
-| DAL | ENTITY. |
-| BLL | DAL y ENTITY. |
-| API | BLL; DAL para composición; ENTITY solo si existe una necesidad concreta. |
+| Entity | Ninguno de los otros proyectos. Referencia explícita a ASP.NET Core para `GymAccount : IdentityUser`; sin EF Core ni proveedores externos. |
+| BLL | ENTITY, sus interfaces e interfaces de repositorio de DAL; nunca implementaciones DAL ni DbContext. |
+| DAL | ENTITY y sus propios contratos; nunca BLL. |
+| API | BLL; DAL para composición y adaptadores Identity; ENTITY cuando sea necesario. Aloja integraciones externas. |
 
-El recorrido habitual durante una solicitud es: **API → BLL → DAL → base de datos**. ENTITY aporta los modelos que utilizan las capas según sus responsabilidades.
+El recorrido habitual durante una solicitud es: **API → interfaz de servicio BLL → servicio BLL → interfaz de repositorio DAL → repositorio DAL → base de datos**. Para entregas externas, el contrato BLL se implementa en API. ENTITY aporta los modelos según sus responsabilidades. Mantenga las capas tradicionales; no introduzca Clean/Onion, CQRS, comandos ni manejadores.
 
-No introduzcas referencias circulares. Esta propuesta corresponde a capas tradicionales: BLL conoce las abstracciones definidas en DAL. No la describas como Clean Architecture, cuya organización de dependencias es diferente.
+No introduzca dependencias circulares. La composición se realiza en API. Los espacios de nombres CLR existentes se conservan por compatibilidad, incluidos nombres históricos `DAL` en algunos tipos ahora compilados en Entity; la propiedad física se verifica mediante ensamblados y referencias de proyecto, no por el nombre del espacio de nombres.
 
 ## Criterios de programación
 

@@ -13,25 +13,30 @@ Use for Static-X backend design, implementation, and review. Read the full [back
 
 ## Hard Rules
 
-- Precedence: explicit user decisions and this project skill override conflicting guide instructions. In particular, use **one project with logical API/BLL/DAL/ENTITY divisions**, not four required physical projects; define persistence contracts in BLL and implement them in DAL, not DAL-owned interfaces. Do not copy the contradictory structure or dependency table from guide lines 7, 23-24, or 49-58.
-- `Static-X.slnx` currently lists four physical projects. Treat this as the existing scaffold, not the target architecture or authorization to reorganize it. Propose any migration separately; never restructure implicitly.
+- Precedence: explicit user decisions override this skill and conflicting guide instructions. Preserve the authorized **four physical traditional projects** under `src/Static_X.{API,BLL,DAL,Entity}` and tests under `tests/Static_X.Tests`, registered in `Static-X.sln`. Do not introduce Clean/Onion, CQRS, handlers, or new layers.
+- Enforce API → BLL → DAL → Entity. Allow BLL/API → Entity and API → DAL for composition. Never allow DAL → BLL/API or BLL → API. BLL consumes DAL repository interfaces, not implementations or DbContext.
+- Put BLL services in `Services`, all six contracts in `Interfaces`; DAL repositories in `Repositories/Interfaces` and `Repositories/Implementations`, context/migrations in `Persistence`, and outbox in `Persistence/Models`. API owns `Auth`, `Controllers`, `CLI`, and `Integrations/Email` implementing BLL's `IActivationEmailSender`.
+- For all future API controllers, use an explicit public constructor, store injected dependencies in private readonly fields, and assign them with `this.field = parameter;`, following `ActivationController`. Do not use primary constructors or migrate existing controllers outside the explicitly requested scope.
+- Put all specific HTTP/business DTOs in BLL `DTOs/{Accounts,Activations,Gyms,Students}`, one conventional class per file with explicit properties and constructors. Preserve JSON, DataAnnotations, defaults, and nullability. Public business services consume DTO field groups and return DTOs, never entities, even in nested results; BLL maps entities and validates independently of MVC. Keep trusted gym/target identifiers, authorized roles, and cancellation separate; client DTO fields never authorize membership/roles. Do not wrap simple identifiers, enums, scalar results, or cancellation-only operations artificially. API owns transport validation/status mapping, not business entity mapping; preserve explicit Identity/auth/composition access to `GymAccount` and role enums. Keep framework errors, entities, internal Entity-owned `ActivationDelivery`, and CLI parser commands in their existing layers; DAL remains entity-based, never referencing BLL DTOs.
 - Scope every account-owned read and write to its gym using trusted server-side identity/membership. Never accept a client-supplied gym ID alone as authorization; prevent cross-gym access, including indirect references and updates.
+- Put AutoMapper profiles in BLL `Mappings`, one per actual responsibility. API composition registers once with a BLL profile marker, scanning only BLL; only response-mapping services consume `IMapper`. Map persisted results through explicit DTO constructor parameters. Keep validation, normalization, trusted gym/role selection, and authorization in services, not profiles. Do not add automatic reverse/request/Identity response maps, controller mapping, DAL/Entity AutoMapper dependencies, or artificial activation profiles. Validate real profiles and preserve null/list behavior in tests. Keep `AutoMapper:LicenseKey` external (`AutoMapper__LicenseKey`), retain license diagnostics, and never assume production eligibility. Add concise Spanish XML summaries to mapping classes and constructors.
 - AI may suggest routine changes; only a trainer can approve and apply them. Never auto-modify routines from AI output or treat suggestions as authorization.
-- Keep ENTITY independent of transport and persistence details; BLL owns use cases, business authorization, and persistence contracts; DAL implements those contracts and owns storage; API owns HTTP contracts, authentication, policy enforcement, and composition. Keep dependencies acyclic and route functional requests through BLL.
+- Entity owns pure `Account`/`AccountRole` and the explicitly authorized `GymAccount : IdentityUser` exception with an ASP.NET Core framework reference. Do not claim Entity is entirely framework-free or add EF/HTTP/provider coupling. `ActivationDelivery` belongs to Entity but is not an EF entity. Preserve existing CLR namespaces, migration IDs/Up/Down, mappings, Data Protection names, and HTTP contracts; use assembly/project-reference checks rather than namespaces as ownership evidence.
+- Document every new or modified BLL service and DAL repository implementation with a concise, single-line Spanish XML `<summary>` immediately above the class and each method, including private helpers and explicit constructors when present. Explain verified responsibilities in neutral/professional Spanish; preserve existing security/operational comments and the language of unrelated comments and literals. Apply this language exception only to these summaries, without behavior changes or unrelated refactoring.
 
 ## Decision Gates
 
 | Situation | Action |
 | --- | --- |
 | Guide conflicts with selected layering | Follow the user-selected architecture above; flag the conflict when relevant. |
-| Change requires physical project moves or reference rewiring | Ask for separate authorization before changing the scaffold. |
+| Change exceeds the authorized physical tree or reference graph | Ask for separate authorization before changing the scaffold. |
 
 ## Execution Steps
 
 1. Inspect existing solution and relevant code before proposing changes; preserve unrelated structure.
-2. Trace HTTP contract → BLL use case → BLL persistence contract → DAL implementation → ENTITY model as applicable.
+2. Trace HTTP contract → BLL service interface → BLL implementation → DAL repository interface → DAL implementation → ENTITY model as applicable.
 3. Validate transport in API, business rules and gym ownership in BLL, and integrity in storage. Use explicit DTOs, parameterized queries, async I/O, cancellation where appropriate, and consistent error handling without leaking internals or secrets.
-4. Test BLL rules, tenant isolation, trainer approval, and persistence constraints with a representative relational provider; run relevant build/tests when available.
+4. Run `dotnet build "Static-X.sln"` and `dotnet test "Static-X.sln" --no-build`, including architecture/model checks, tenant isolation, and HTTP/activation/CLI regressions. Never use real SQL Server writes or Resend delivery as migration verification.
 
 ## Output Contract
 
@@ -40,3 +45,4 @@ Report affected divisions, decisions or assumptions, executed checks, and any un
 ## References
 
 - [Full backend guide](../../../Docs/Guia_Backend_Senior_NET_Capas.md) — local source of detailed conventions, subject to the precedence above.
+- [Physical architecture](../../../Docs/BackendArchitecture.md) — project ownership, compatibility, and package allocation.

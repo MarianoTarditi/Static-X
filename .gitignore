@@ -10,8 +10,8 @@
 .codegraph/
 
 # Machine-specific configuration and secrets
-Static-X/appsettings.json
-Static-X/appsettings.Development.json
+src/Static_X.API/appsettings.json
+src/Static_X.API/appsettings.Development.json
 **/appsettings.Local.json
 **/appsettings.*.local.json
 .env

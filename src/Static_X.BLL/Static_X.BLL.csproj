@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="AutoMapper" Version="16.2.0" />
+    <ProjectReference Include="..\Static_X.DAL\Static_X.DAL.csproj" />
+    <ProjectReference Include="..\Static_X.Entity\Static_X.Entity.csproj" />
+    <!-- Existing activation services consume Data Protection and IConfiguration. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <Using Include="Microsoft.Extensions.Configuration" />
+  </ItemGroup>
+</Project>
