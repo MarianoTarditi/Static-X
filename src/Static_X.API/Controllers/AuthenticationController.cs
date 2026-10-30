@@ -2,19 +2,22 @@ using System.Security.Claims;
 using BLL.DTOs.Accounts;
 using BLL.Services.Interfaces;
 using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Static_X.API.Auth;
 
 namespace Static_X.API.Controllers;
 
 [ApiController]
 [Route("api/account")]
-public sealed class AccountController : ControllerBase
+public sealed class AuthenticationController : ControllerBase
 {
     private readonly IAccountService accounts;
     private readonly IAntiforgery antiforgery;
 
-    public AccountController(IAccountService accounts, IAntiforgery antiforgery)
+    public AuthenticationController(IAccountService accounts, IAntiforgery antiforgery)
     {
         this.accounts = accounts;
         this.antiforgery = antiforgery;
@@ -25,7 +28,7 @@ public sealed class AccountController : ControllerBase
     [AllowAnonymous]
     public IActionResult Csrf()
     {
-        Response.Headers.CacheControl = "no-store";
+        Response.Headers.CacheControl = "no-cache, no-store";
         return Ok(new CsrfResponse(antiforgery.GetAndStoreTokens(HttpContext).RequestToken));
     }
 
@@ -40,13 +43,24 @@ public sealed class AccountController : ControllerBase
         return Ok(account);
     }
 
+    [HttpPost("logout")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> Logout()
+    {
+        await HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);
+        Response.Headers.CacheControl = "no-store";
+        return NoContent();
+    }
+
     [HttpGet("me")]
     [Authorize]
     public async Task<ActionResult<AccountResponse>> Me(CancellationToken cancellationToken)
     {
         var id = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        var gym = User.FindFirstValue("gym_id");
-        if (!int.TryParse(gym, out var gymId) || id is null)
+        if (!AccountScope.TryGetGymId(User, out var gymId) || id is null)
             return Forbid();
         var account = await accounts.FindByIdAsync(gymId, id, cancellationToken);
         if (account is null || User.FindFirstValue(ClaimTypes.Role) != account.Role.ToString())

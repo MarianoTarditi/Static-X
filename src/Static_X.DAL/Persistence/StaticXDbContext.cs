@@ -30,6 +30,10 @@ namespace DAL
                 account.HasOne<Gimnasio>().WithMany().HasForeignKey(a => a.GymId)
                     .OnDelete(DeleteBehavior.Restrict);
                 account.HasIndex(a => new { a.GymId, a.NormalizedEmail }).IsUnique();
+                account.HasIndex(a => a.NormalizedEmail, "GlobalEmailIndex").IsUnique()
+                    .HasFilter("[GymId] IS NULL");
+                account.ToTable("AspNetUsers", table => table.HasCheckConstraint("CK_AspNetUsers_RoleGym",
+                    "([Role] = 'SuperAdmin' AND [GymId] IS NULL) OR ([Role] IN ('GymAdmin', 'Trainer', 'Student') AND [GymId] IS NOT NULL)"));
             });
 
             modelBuilder.Entity<Gimnasio>(gym =>

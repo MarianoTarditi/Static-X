@@ -20,13 +20,14 @@ public sealed class MappingTests
     }
 
     [Fact]
-    public void Profiles_ContainOnlyThreeExplicitEntityToResponseMapsInBll()
+    public void Profiles_ContainOnlyFourExplicitEntityToResponseMapsInBll()
     {
         // Test-only configuration inspection prevents accidental reverse, request, or Identity maps.
         var maps = TestMapper.Configuration.Internal().GetAllTypeMaps();
-        Assert.Equal(3, maps.Count);
+        Assert.Equal(4, maps.Count);
         Assert.Contains(maps, map => map.SourceType == typeof(Alumno) && map.DestinationType == typeof(StudentResponse));
         Assert.Contains(maps, map => map.SourceType == typeof(Account) && map.DestinationType == typeof(AccountResponse));
+        Assert.Contains(maps, map => map.SourceType == typeof(Account) && map.DestinationType == typeof(PendingAdministratorResponse));
         Assert.Contains(maps, map => map.SourceType == typeof(Gimnasio) && map.DestinationType == typeof(GymResponse));
         Assert.All(new[] { typeof(StudentProfile), typeof(AccountProfile), typeof(GymProfile) }, profile =>
         {
@@ -74,6 +75,22 @@ public sealed class MappingTests
     }
 
     [Fact]
+    public void AccountProfile_PendingAdministrator_MapsOnlyExactSafeFieldsWithoutNormalization()
+    {
+        var result = TestMapper.Instance.Map<PendingAdministratorResponse>(new Account("opaque", 31, " Mixed@Example.invalid ", AccountRole.GymAdmin));
+        Assert.Equal(("opaque", " Mixed@Example.invalid "), (result.AccountId, result.Email));
+        Assert.Equal(new[] { "AccountId", "Email" }, typeof(PendingAdministratorResponse).GetProperties().Select(property => property.Name).Order());
+        Assert.Null(TestMapper.Instance.Map<PendingAdministratorResponse>((Account?)null));
+        Assert.Empty(TestMapper.Instance.Map<PendingAdministratorResponse[]>(Array.Empty<Account>()));
+        var items = TestMapper.Instance.Map<PendingAdministratorResponse[]>(new[]
+        {
+            new Account("z", 31, "z@example.invalid", AccountRole.GymAdmin),
+            new Account("a", 31, "a@example.invalid", AccountRole.GymAdmin)
+        });
+        Assert.Equal(new[] { ("z", "z@example.invalid"), ("a", "a@example.invalid") }, items.Select(item => (item.AccountId, item.Email)));
+    }
+
+    [Fact]
     public void Profiles_NullEntitiesRemainNull_AndStudentArraysPreserveOrderAndEmptyResults()
     {
         Assert.Null(TestMapper.Instance.Map<StudentResponse>((Alumno?)null));
@@ -101,5 +118,7 @@ public sealed class MappingTests
         Assert.Throws<AutoMapperMappingException>(() => mapper.Map<Alumno>(new UpdateStudentRequest()));
         Assert.Throws<AutoMapperMappingException>(() => mapper.Map<GymAccount>(new CreateAccountRequest("a@example.com", "not-a-real-password")));
         Assert.Throws<AutoMapperMappingException>(() => mapper.Map<AccountResponse>(new GymAccount { PasswordHash = "not-a-real-hash", SecurityStamp = "not-a-real-stamp" }));
+        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<Account>(new PendingAdministratorResponse("id", "a@example.invalid")));
+        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<PendingAdministratorResponse>(new GymAccount { PasswordHash = "private" }));
     }
 }

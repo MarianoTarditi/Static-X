@@ -1,4 +1,5 @@
 using DAL.Repositories.Interfaces;
+using DAL.Repositories.Exceptions;
 using Entity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -70,12 +71,12 @@ public sealed class ActivationRepository(StaticXDbContext context, UserManager<G
             account.NormalizedEmail != users.NormalizeEmail(email) ||
             await context.Gimnasios.Where(g => g.Id == existing.GymId)
                 .Select(g => g.Nombre).SingleAsync(cancellationToken) != gymName)
-            throw new InvalidOperationException("Provisioning key belongs to a different request.");
+            throw new ProvisioningConflictException();
         return existing.GymId;
     }
 
-    /// <summary>Consume una invitación vigente, establece la contraseña, confirma el correo y borra el token protegido en una transacción.</summary>
-    public async Task<bool> ActivateAsync(string tokenHash, string password, DateTimeOffset now,
+    /// <summary>Activa una invitación vigente y devuelve la cuenta persistida solo después de confirmar la transacción.</summary>
+    public async Task<Account?> ActivateAsync(string tokenHash, string password, DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
@@ -83,30 +84,30 @@ public sealed class ActivationRepository(StaticXDbContext context, UserManager<G
             .SingleOrDefaultAsync(i => i.TokenHash == tokenHash && i.ConsumedAt == null && i.RevokedAt == null && i.ExpiresAt > now.UtcDateTime,
                 cancellationToken);
         if (invitation is null)
-            return false;
+            return null;
         var account = await context.Users.SingleOrDefaultAsync(u => u.Id == invitation.AccountId &&
             u.GymId == invitation.GymId && u.Role == AccountRole.GymAdmin && !u.EmailConfirmed &&
             u.PasswordHash == null, cancellationToken);
-        if (account is null)
-            return false;
+        if (account is null || account.GymId is not int gymId || gymId <= 0)
+            return null;
         // Conditional SQL claim serializes contenders before Identity writes; rollback restores it on failure.
         var claimed = await context.ActivationInvitations
             .Where(i => i.Id == invitation.Id && i.ConsumedAt == null && i.RevokedAt == null && i.ExpiresAt > now.UtcDateTime)
             .ExecuteUpdateAsync(s => s.SetProperty(i => i.ConsumedAt, now.UtcDateTime), cancellationToken);
         if (claimed != 1)
-            return false;
+            return null;
         var result = await users.AddPasswordAsync(account, password);
         if (!result.Succeeded)
-            return false;
+            return null;
         account.EmailConfirmed = true;
         result = await users.UpdateAsync(account);
         if (!result.Succeeded)
-            return false;
+            return null;
         // Delivery secret is no longer needed after a successful claim.
         await context.ActivationOutbox.Where(o => o.InvitationId == invitation.Id)
             .ExecuteUpdateAsync(s => s.SetProperty(o => o.ProtectedToken, string.Empty), cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return true;
+        return new Account(account.Id, gymId, account.Email!, account.Role);
     }
 
     /// <summary>Para un administrador pendiente del gimnasio indicado, revoca invitaciones previas y crea una nueva con su envío en una transacción.</summary>

@@ -1,0 +1,39 @@
+@baseUrl = https://localhost:7226
+@csrf = {{privateSessionCsrfToken}}
+
+### Fetch a session-bound CSRF token before login, then refresh it after login.
+GET {{baseUrl}}/api/account/csrf
+
+### Global login: supply the password privately; preserve the cookie session.
+POST {{baseUrl}}/api/account/login
+Content-Type: application/json
+X-CSRF-TOKEN: {{csrf}}
+
+{ "email": "superadmin@example.invalid", "password": "{{privatePassword}}" }
+
+### List all gyms with the validated SuperAdmin cookie. Safe GET needs no CSRF header.
+GET {{baseUrl}}/api/gyms?page=1&pageSize=20
+
+### Select a pending administrator using only accountId/email. This does not issue an invitation.
+GET {{baseUrl}}/api/gyms/{{approvedGymId}}/administrators/pending?page=1&pageSize=20
+
+### An unknown positive gym returns 404 for an authenticated SuperAdmin.
+GET {{baseUrl}}/api/gyms/2147483647/administrators/pending
+
+### Invalid pagination returns 400; pageSize is bounded to 1–100.
+GET {{baseUrl}}/api/gyms?page=0&pageSize=101
+
+### Provision with a stable opaque idempotency key. Returns the gym ID, not an invitation token.
+POST {{baseUrl}}/api/gyms/provision
+Content-Type: application/json
+X-CSRF-TOKEN: {{csrf}}
+
+{ "key": "opaque-request-001", "gymName": "Example Gym", "email": "admin@example.invalid" }
+
+### Reissue only an approved pending administrator target. No body is required.
+POST {{baseUrl}}/api/gyms/{{approvedGymId}}/administrators/{{approvedAccountId}}/invitation
+X-CSRF-TOKEN: {{csrf}}
+
+### An unknown pending administrator target returns 404 for an authenticated SuperAdmin.
+POST {{baseUrl}}/api/gyms/2147483647/administrators/unknown/invitation
+X-CSRF-TOKEN: {{csrf}}

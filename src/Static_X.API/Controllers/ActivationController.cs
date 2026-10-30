@@ -18,6 +18,8 @@ public sealed class ActivationController : ControllerBase
 
     [HttpPost]
     [AllowAnonymous]
+    [ProducesResponseType<ActivationResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Activate(
         ActivateAccountRequest request,
         CancellationToken cancellationToken)
@@ -25,13 +27,14 @@ public sealed class ActivationController : ControllerBase
         Response.Headers.CacheControl = "no-store";
         Response.Headers["Referrer-Policy"] = "no-referrer";
 
-        if (!await activation.ActivateAsync(request, cancellationToken))
+        var response = await activation.ActivateAsync(request, cancellationToken);
+        if (response is null)
             return BadRequest(new ProblemDetails
             {
                 Status = 400,
                 Title = "Invalid activation request."
             });
 
-        return NoContent();
+        return Ok(response);
     }
 }

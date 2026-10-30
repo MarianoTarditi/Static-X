@@ -24,20 +24,20 @@ public sealed class StudentsController : ControllerBase
     [ProducesResponseType<StudentResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<StudentResponse>> Create(CreateStudentRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<StudentResponse>> CreateStudent(CreateStudentRequest request, CancellationToken cancellationToken)
     {
-        if (!TryGetGym(out var gymId)) return Forbid();
+        if (!TryGetCurrentGymId(out var gymId)) return Forbid();
         var student = await students.AddAsync(gymId, request, cancellationToken);
-        return CreatedAtAction(nameof(Find), new { id = student.Id }, student);
+        return CreatedAtAction(nameof(GetStudentById), new { id = student.Id }, student);
     }
 
     /// <summary>Returns a student page in the session gym, optionally filtered by state and substring.</summary>
     [HttpGet]
     [ProducesResponseType<StudentListResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<StudentListResponse>> List([FromQuery] StudentListRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<StudentListResponse>> GetStudents([FromQuery] StudentListRequest request, CancellationToken cancellationToken)
     {
-        if (!TryGetGym(out var gymId)) return Forbid();
+        if (!TryGetCurrentGymId(out var gymId)) return Forbid();
         var result = await students.ListAsync(gymId, request, cancellationToken);
         return Ok(result);
     }
@@ -47,9 +47,9 @@ public sealed class StudentsController : ControllerBase
     [ProducesResponseType<StudentResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<StudentResponse>> Find(int id, CancellationToken cancellationToken)
+    public async Task<ActionResult<StudentResponse>> GetStudentById(int id, CancellationToken cancellationToken)
     {
-        if (!TryGetGym(out var gymId)) return Forbid();
+        if (!TryGetCurrentGymId(out var gymId)) return Forbid();
         if (id <= 0) return Problem(statusCode: 400, title: "A positive student identifier is required.");
         var student = await students.FindAsync(gymId, id, cancellationToken);
         return student is null
@@ -63,9 +63,9 @@ public sealed class StudentsController : ControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<StudentResponse>> Update(int id, UpdateStudentRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<StudentResponse>> UpdateStudent(int id, UpdateStudentRequest request, CancellationToken cancellationToken)
     {
-        if (!TryGetGym(out var gymId)) return Forbid();
+        if (!TryGetCurrentGymId(out var gymId)) return Forbid();
         if (id <= 0) return Problem(statusCode: 400, title: "A positive student identifier is required.");
         var student = await students.UpdateAsync(gymId, id, request, cancellationToken);
         return student is null
@@ -78,9 +78,9 @@ public sealed class StudentsController : ControllerBase
     [ProducesResponseType<StudentResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<StudentResponse>> Deactivate(int id, CancellationToken cancellationToken)
+    public async Task<ActionResult<StudentResponse>> DeactivateStudent(int id, CancellationToken cancellationToken)
     {
-        if (!TryGetGym(out var gymId)) return Forbid();
+        if (!TryGetCurrentGymId(out var gymId)) return Forbid();
         if (id <= 0) return Problem(statusCode: 400, title: "A positive student identifier is required.");
         var student = await students.DeactivateAsync(gymId, id, cancellationToken);
         return student is null
@@ -93,9 +93,9 @@ public sealed class StudentsController : ControllerBase
     [ProducesResponseType<StudentResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<StudentResponse>> Reactivate(int id, CancellationToken cancellationToken)
+    public async Task<ActionResult<StudentResponse>> ReactivateStudent(int id, CancellationToken cancellationToken)
     {
-        if (!TryGetGym(out var gymId)) return Forbid();
+        if (!TryGetCurrentGymId(out var gymId)) return Forbid();
         if (id <= 0) return Problem(statusCode: 400, title: "A positive student identifier is required.");
         var student = await students.ReactivateAsync(gymId, id, cancellationToken);
         return student is null
@@ -103,7 +103,7 @@ public sealed class StudentsController : ControllerBase
             : Ok(student);
     }
 
-    private bool TryGetGym(out int gymId) =>
+    private bool TryGetCurrentGymId(out int gymId) =>
         int.TryParse(User.FindFirstValue("gym_id"), NumberStyles.None, CultureInfo.InvariantCulture, out gymId) && gymId > 0;
 
 }

@@ -6,11 +6,11 @@ namespace BLL.DTOs.Accounts;
 public sealed class AccountResponse
 {
     public string Id { get; init; }
-    public int GymId { get; init; }
+    public int? GymId { get; init; }
     public string Email { get; init; }
     public AccountRole Role { get; init; }
 
-    public AccountResponse(string Id, int GymId, string Email, AccountRole Role)
+    public AccountResponse(string Id, int? GymId, string Email, AccountRole Role)
     {
         this.Id = Id;
         this.GymId = GymId;

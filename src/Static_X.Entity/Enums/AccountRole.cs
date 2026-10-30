@@ -4,5 +4,6 @@ public enum AccountRole
 {
     GymAdmin = 1,
     Trainer = 2,
-    Student = 3
+    Student = 3,
+    SuperAdmin = 4
 }

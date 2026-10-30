@@ -25,7 +25,8 @@ public sealed class DtoContractTests
         typeof(LoginRequest), typeof(AccountResponse), typeof(CsrfResponse),
         typeof(ActivateAccountRequest), typeof(CreateStudentRequest), typeof(UpdateStudentRequest), typeof(StudentResponse),
         typeof(CreateAccountRequest), typeof(ProvisionGymRequest), typeof(CreateGymRequest), typeof(GymResponse),
-        typeof(StudentListRequest), typeof(StudentListResponse)
+        typeof(StudentListRequest), typeof(StudentListResponse), typeof(ActivationResponse),
+        typeof(GymListRequest), typeof(GymListResponse), typeof(PendingAdministratorResponse), typeof(PendingAdministratorListResponse)
     ];
 
     [Fact]
@@ -64,6 +65,7 @@ public sealed class DtoContractTests
             (new CsrfResponse("request-token"), "{\"token\":\"request-token\"}"),
             (new ActivateAccountRequest { Token = "activation-token", Password = "example" },
                 "{\"token\":\"activation-token\",\"password\":\"example\"}"),
+            (new ActivationResponse(2), "{\"gymId\":2}"),
             (new CreateStudentRequest { Nombre = "Ana", Apellido = "Smith", Email = "ana@example.com" },
                 "{\"nombre\":\"Ana\",\"apellido\":\"Smith\",\"email\":\"ana@example.com\"}"),
             (new UpdateStudentRequest { Nombre = "Ana", Apellido = "Smith", Email = "ana@example.com" },
@@ -71,7 +73,14 @@ public sealed class DtoContractTests
             (new StudentResponse(23, "Ana", "Smith", "ana@example.com", false),
                 "{\"id\":23,\"nombre\":\"Ana\",\"apellido\":\"Smith\",\"email\":\"ana@example.com\",\"activo\":false}"),
             (new StudentListResponse(new[] { new StudentResponse(23, "Ana", "Smith", "ana@example.com", false) }, 2, 1, 42),
-                "{\"items\":[{\"id\":23,\"nombre\":\"Ana\",\"apellido\":\"Smith\",\"email\":\"ana@example.com\",\"activo\":false}],\"page\":2,\"pageSize\":1,\"totalCount\":42}")
+                "{\"items\":[{\"id\":23,\"nombre\":\"Ana\",\"apellido\":\"Smith\",\"email\":\"ana@example.com\",\"activo\":false}],\"page\":2,\"pageSize\":1,\"totalCount\":42}"),
+            (new GymListRequest(), "{\"page\":1,\"pageSize\":20}"),
+            (new GymListResponse([new GymResponse(2, "Example gym")], 1, 20, 1),
+                "{\"items\":[{\"id\":2,\"nombre\":\"Example gym\"}],\"page\":1,\"pageSize\":20,\"totalCount\":1}"),
+            (new PendingAdministratorResponse("opaque", "admin@example.invalid"),
+                "{\"accountId\":\"opaque\",\"email\":\"admin@example.invalid\"}"),
+            (new PendingAdministratorListResponse([new PendingAdministratorResponse("opaque", "admin@example.invalid")], 2, 1, 3),
+                "{\"items\":[{\"accountId\":\"opaque\",\"email\":\"admin@example.invalid\"}],\"page\":2,\"pageSize\":1,\"totalCount\":3}")
         };
         foreach (var (value, json) in examples)
         {
@@ -89,7 +98,7 @@ public sealed class DtoContractTests
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<LoginRequest>("{}", options));
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<ActivateAccountRequest>("{}", options));
-        Assert.All(typeof(LoginRequest).GetProperties(), property =>
+        Assert.All(typeof(LoginRequest).GetProperties().Where(property => property.Name != "GymId"), property =>
             Assert.NotNull(property.GetCustomAttribute<RequiredMemberAttribute>()));
         Assert.All(typeof(ActivateAccountRequest).GetProperties(), property =>
             Assert.NotNull(property.GetCustomAttribute<RequiredMemberAttribute>()));
@@ -106,6 +115,11 @@ public sealed class DtoContractTests
         Assert.Equal(new[] { "Email", "GymId", "Password" }, InvalidMembers(
             new LoginRequest { GymId = 0, Email = "invalid", Password = " " }));
         Assert.Empty(InvalidMembers(new LoginRequest { GymId = int.MaxValue, Email = "a@example.com", Password = "example" }));
+        var global = JsonSerializer.Deserialize<LoginRequest>("{\"email\":\"global@example.com\",\"password\":\"example\"}", options)!;
+        Assert.Null(global.GymId);
+        Assert.Empty(InvalidMembers(global));
+        Assert.Equal("{\"id\":\"global\",\"gymId\":null,\"email\":\"global@example.com\",\"role\":4}",
+            JsonSerializer.Serialize(new AccountResponse("global", null, "global@example.com", AccountRole.SuperAdmin), options));
         Assert.Equal(new[] { "Password", "Token" }, InvalidMembers(new ActivateAccountRequest { Token = " ", Password = "" }));
         Assert.Empty(InvalidMembers(new ActivateAccountRequest { Token = "token", Password = "example" }));
         Assert.Empty(InvalidMembers(new CreateStudentRequest { Nombre = "Ana", Apellido = "Smith", Email = "invalid" }));
@@ -120,7 +134,7 @@ public sealed class DtoContractTests
             .UseSetting("Activation:KeyRingPath", ""));
         var actions = factory.Services.GetRequiredService<IActionDescriptorCollectionProvider>().ActionDescriptors.Items
             .Cast<ControllerActionDescriptor>().ToArray();
-        Assert.Equal(10, actions.Length);
+        Assert.Equal(15, actions.Length);
         Assert.All(actions, action => Assert.Equal(typeof(Program).Assembly, action.ControllerTypeInfo.Assembly));
         var provider = factory.Services.GetRequiredService<IModelMetadataProvider>();
         foreach (var type in new[] { typeof(LoginRequest), typeof(ActivateAccountRequest), typeof(CreateStudentRequest), typeof(UpdateStudentRequest) })
@@ -143,27 +157,58 @@ public sealed class DtoContractTests
         using var response = await client.GetAsync("/openapi/v1.json");
         response.EnsureSuccessStatusCode();
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var logoutPath = document.RootElement.GetProperty("paths").GetProperty("/api/account/logout");
+        Assert.False(logoutPath.TryGetProperty("get", out _));
+        var logout = logoutPath.GetProperty("post");
+        Assert.False(logout.TryGetProperty("requestBody", out _));
+        Assert.Equal(new[] { "204", "400", "401" }, logout.GetProperty("responses")
+            .EnumerateObject().Select(property => property.Name).Order());
+        Assert.False(logout.GetProperty("responses").GetProperty("204").TryGetProperty("content", out _));
         var schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
         var expected = new Dictionary<string, string[]>
         {
             ["LoginRequest"] = ["email", "gymId", "password"],
             ["AccountResponse"] = ["email", "gymId", "id", "role"],
             ["ActivateAccountRequest"] = ["password", "token"],
+            ["ActivationResponse"] = ["gymId"],
             ["CreateStudentRequest"] = ["apellido", "email", "nombre"],
             ["UpdateStudentRequest"] = ["apellido", "email", "nombre"],
             ["StudentResponse"] = ["activo", "apellido", "email", "id", "nombre"],
-            ["StudentListResponse"] = ["items", "page", "pageSize", "totalCount"]
+            ["StudentListResponse"] = ["items", "page", "pageSize", "totalCount"],
+            ["GymResponse"] = ["id", "nombre"],
+            ["GymListResponse"] = ["items", "page", "pageSize", "totalCount"],
+            ["PendingAdministratorResponse"] = ["accountId", "email"],
+            ["PendingAdministratorListResponse"] = ["items", "page", "pageSize", "totalCount"]
         };
         foreach (var (name, fields) in expected)
         {
             var schema = schemas.GetProperty(name);
             Assert.Equal(fields, schema.GetProperty("properties").EnumerateObject().Select(property => property.Name).Order());
         }
-        Assert.Equal(new[] { "email", "gymId", "password" }, schemas.GetProperty("LoginRequest")
+        Assert.Equal(new[] { "email", "password" }, schemas.GetProperty("LoginRequest")
             .GetProperty("required").EnumerateArray().Select(field => field.GetString()).Order());
         Assert.Equal(new[] { "password", "token" }, schemas.GetProperty("ActivateAccountRequest")
             .GetProperty("required").EnumerateArray().Select(field => field.GetString()).Order());
         var listOperation = document.RootElement.GetProperty("paths").GetProperty("/api/students").GetProperty("get");
+        foreach (var (path, responseType, parameters) in new[]
+        {
+            ("/api/gyms", "GymListResponse", new[] { "Page", "PageSize" }),
+            ("/api/gyms/{gymId}/administrators/pending", "PendingAdministratorListResponse", new[] { "Page", "PageSize", "gymId" })
+        })
+        {
+            var operation = document.RootElement.GetProperty("paths").GetProperty(path).GetProperty("get");
+            Assert.EndsWith("/" + responseType, operation.GetProperty("responses").GetProperty("200").GetProperty("content")
+                .GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
+            Assert.Equal(parameters.Order(), operation.GetProperty("parameters").EnumerateArray()
+                .Select(parameter => parameter.GetProperty("name").GetString()).Order());
+            foreach (var status in new[] { "400", "401", "403", "500" })
+                Assert.True(operation.GetProperty("responses").TryGetProperty(status, out _));
+        }
+        var activationResponses = document.RootElement.GetProperty("paths").GetProperty("/api/account/activation")
+            .GetProperty("post").GetProperty("responses");
+        Assert.False(activationResponses.TryGetProperty("204", out _));
+        Assert.EndsWith("/ActivationResponse", activationResponses.GetProperty("200").GetProperty("content")
+            .GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
         var listSchema = listOperation.GetProperty("responses").GetProperty("200").GetProperty("content")
             .GetProperty("application/json").GetProperty("schema");
         Assert.EndsWith("/StudentListResponse", listSchema.GetProperty("$ref").GetString());

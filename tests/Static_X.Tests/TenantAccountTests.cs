@@ -111,6 +111,54 @@ public sealed class TenantAccountTests
         Assert.Equal(0, await db.Context.Users.CountAsync());
     }
 
+    [Theory]
+    [InlineData("admin-without-gym")]
+    [InlineData("trainer-without-gym")]
+    [InlineData("student-without-gym")]
+    [InlineData("global-with-gym")]
+    [InlineData("unknown-role")]
+    [InlineData("missing-gym")]
+    public async Task AccountSchema_InvalidRoleScopeOrForeignGym_IsRejected(string scenario)
+    {
+        await using var db = await AccountDatabase.CreateAsync();
+        var gym = await db.Gyms.AddAsync(new CreateGymRequest("Existing"));
+        var account = new GymAccount { Id = "invalid", UserName = "invalid", Email = "invalid@example.com", NormalizedEmail = "INVALID@EXAMPLE.COM",
+            GymId = scenario is "global-with-gym" or "unknown-role" ? gym.Id : scenario == "missing-gym" ? gym.Id + 1 : null,
+            Role = scenario switch { "admin-without-gym" => AccountRole.GymAdmin, "trainer-without-gym" => AccountRole.Trainer,
+                "student-without-gym" or "missing-gym" => AccountRole.Student, "unknown-role" => (AccountRole)99, _ => AccountRole.SuperAdmin } };
+        db.Context.Users.Add(account);
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.Context.SaveChangesAsync());
+        Assert.Equal(0, await db.Context.Users.AsNoTracking().CountAsync());
+    }
+
+    [Fact]
+    public async Task AccountSchema_GlobalEmailUnique_AllowsSameEmailInSeparateTenantsWithoutFakeGym()
+    {
+        await using var db = await AccountDatabase.CreateAsync();
+        var global = new GymAccount { Id = "global", UserName = "global", Email = "same@example.com", Role = AccountRole.SuperAdmin };
+        Assert.True((await db.Users.CreateAsync(global, "GlobalPassword1!")).Succeeded);
+        Assert.Equal(0, await db.Context.Gimnasios.CountAsync());
+        var first = await db.Gyms.AddAsync(new CreateGymRequest("First"));
+        var second = await db.Gyms.AddAsync(new CreateGymRequest("Second"));
+        await db.Accounts.CreateAsync(first.Id, new CreateAccountRequest("same@example.com", "TenantPassword1!"), AccountRole.GymAdmin);
+        await db.Accounts.CreateAsync(second.Id, new CreateAccountRequest("same@example.com", "TenantPassword1!"), AccountRole.Student);
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.Users.CreateAsync(new GymAccount
+        { Id = "duplicate", UserName = "duplicate", Email = "SAME@example.com", Role = AccountRole.SuperAdmin }, "OtherPassword1!"));
+        Assert.Equal(3, await db.Context.Users.CountAsync());
+        Assert.Equal(1, await db.Context.Users.CountAsync(u => u.GymId == null));
+    }
+
+    [Fact]
+    public async Task Create_SuperAdminThroughTenantService_IsRejectedWithoutPersistence()
+    {
+        await using var db = await AccountDatabase.CreateAsync();
+        var gym = await db.Gyms.AddAsync(new CreateGymRequest("First"));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => db.Accounts.CreateAsync(gym.Id,
+            new CreateAccountRequest("global@example.com", "GlobalPassword1!"), AccountRole.SuperAdmin));
+        Assert.Equal(0, await db.Context.Users.CountAsync());
+        Assert.Equal((1, 2, 3, 4), ((int)AccountRole.GymAdmin, (int)AccountRole.Trainer, (int)AccountRole.Student, (int)AccountRole.SuperAdmin));
+    }
+
     private sealed class AccountDatabase : IAsyncDisposable
     {
         private readonly SqliteConnection connection;

@@ -15,6 +15,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using Static_X.API.Integrations;
 using Microsoft.Extensions.Hosting;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using System.Data.Common;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Static_X.Tests;
 
@@ -31,13 +35,15 @@ public sealed class ActivationTests
     [InlineData("email-null")]
     [InlineData("email-blank")]
     [InlineData("email-long")]
+    [InlineData("email-format")]
+    [InlineData("email-display-name")]
     public async Task Provision_InvalidDto_RejectsBeforePersistence(string scenario)
     {
         await using var fixture = await Fixture.CreateAsync();
         var request = scenario == "null" ? null : new ProvisionGymRequest(
             scenario switch { "key-null" => null!, "key-blank" => " ", "key-long" => new string('k', 129), _ => "request-a" },
             scenario switch { "name-null" => null!, "name-blank" => " ", "name-long" => new string('n', 201), _ => "North" },
-            scenario switch { "email-null" => null!, "email-blank" => " ", "email-long" => new string('e', 257), _ => "admin@example.com" });
+             scenario switch { "email-null" => null!, "email-blank" => " ", "email-long" => new string('e', 257), "email-format" => "invalid", "email-display-name" => "Admin <admin@example.com>", _ => "admin@example.com" });
         var error = await Record.ExceptionAsync(() => fixture.Service.ProvisionAsync(request!));
         if (scenario == "null") Assert.IsType<ArgumentNullException>(error);
         else Assert.IsType<ArgumentException>(error);
@@ -57,7 +63,7 @@ public sealed class ActivationTests
     [InlineData("token-nonhex")]
     [InlineData("password-null")]
     [InlineData("password-blank")]
-    public async Task Activate_InvalidDto_ReturnsFalseWithoutConsumingInvitation(string scenario)
+    public async Task Activate_InvalidDto_ReturnsNullWithoutConsumingInvitation(string scenario)
     {
         await using var fixture = await Fixture.CreateAsync();
         await fixture.Service.ProvisionAsync(new ProvisionGymRequest("request-a", "North", "admin@example.com"));
@@ -71,7 +77,7 @@ public sealed class ActivationTests
             },
             Password = scenario == "password-null" ? null! : scenario == "password-blank" ? " " : "StrongPassword1!"
         };
-        Assert.False(await fixture.Service.ActivateAsync(request!));
+        Assert.Null(await fixture.Service.ActivateAsync(request!));
         Assert.Null((await fixture.Context.ActivationInvitations.AsNoTracking().SingleAsync()).ConsumedAt);
         Assert.Null((await fixture.Context.Users.AsNoTracking().SingleAsync()).PasswordHash);
         Assert.False((await fixture.Context.Users.AsNoTracking().SingleAsync()).EmailConfirmed);
@@ -104,8 +110,8 @@ public sealed class ActivationTests
         var user = await fixture.Context.Users.SingleAsync();
         Assert.Null(user.PasswordHash);
         Assert.False(user.EmailConfirmed);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.ProvisionAsync(new ProvisionGymRequest("request-a", "South", "admin@example.com")));
+        await Assert.ThrowsAsync<BLL.Exceptions.ProvisioningConflictException>(() =>
+             fixture.Service.ProvisionAsync(new ProvisionGymRequest("request-a", "South", "admin@example.com")));
         Assert.Equal(1, await fixture.Context.Gimnasios.CountAsync());
     }
 
@@ -125,10 +131,12 @@ public sealed class ActivationTests
         await using var fixture = await Fixture.CreateAsync();
         await fixture.Service.ProvisionAsync(new ProvisionGymRequest("request-a", "North", "admin@example.com"));
         var token = await fixture.GetTokenAsync();
-        Assert.False(await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = token, Password = "weak" }));
+        Assert.Null(await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = token, Password = "weak" }));
         Assert.Null((await fixture.Context.ActivationInvitations.AsNoTracking().SingleAsync()).ConsumedAt);
         Assert.Null((await fixture.Context.Users.AsNoTracking().SingleAsync()).PasswordHash);
-        Assert.True(await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = token, Password = "StrongPassword1!" }));
+        var response = await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = token, Password = "StrongPassword1!" });
+        Assert.Equal((await fixture.Context.Users.AsNoTracking().SingleAsync()).GymId,
+            Assert.IsType<ActivationResponse>(response).GymId);
     }
 
     [Fact]
@@ -137,8 +145,14 @@ public sealed class ActivationTests
         await using var fixture = await Fixture.CreateAsync();
         await fixture.Service.ProvisionAsync(new ProvisionGymRequest("request-a", "North", "admin@example.com"));
         var token = await fixture.GetTokenAsync();
-        Assert.True(await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = token, Password = "StrongPassword1!" }));
-        Assert.False(await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = token, Password = "OtherPassword1!" }));
+        var response = await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = token, Password = "StrongPassword1!" });
+        Assert.Null(await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = token, Password = "OtherPassword1!" }));
+        using var persistedScope = fixture.CreateScope();
+        var persisted = await persistedScope.ServiceProvider.GetRequiredService<StaticXDbContext>().Users.AsNoTracking().SingleAsync();
+        Assert.True(Assert.IsType<ActivationResponse>(response).GymId > 0);
+        Assert.Equal(persisted.GymId, response.GymId);
+        Assert.True(persisted.EmailConfirmed);
+        Assert.True(await fixture.Users.CheckPasswordAsync(persisted, "StrongPassword1!"));
         var user = await fixture.Context.Users.SingleAsync();
         Assert.True(user.EmailConfirmed);
         Assert.True(await fixture.Users.CheckPasswordAsync(user, "StrongPassword1!"));
@@ -163,15 +177,69 @@ public sealed class ActivationTests
         Assert.True((await fixture.Users.CreateAsync(trainer)).Succeeded);
         invitation.AccountId = trainer.Id;
         await fixture.Context.SaveChangesAsync();
-        Assert.False(await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = token, Password = "StrongPassword1!" }));
+        Assert.Null(await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = token, Password = "StrongPassword1!" }));
         Assert.Null(invitation.ConsumedAt);
         Assert.Null((await fixture.Users.FindByIdAsync(trainer.Id))?.PasswordHash);
         invitation.AccountId = originalAccount;
         invitation.ExpiresAt = DateTime.UtcNow.AddSeconds(-1);
         await fixture.Context.SaveChangesAsync();
-        Assert.False(await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = token, Password = "StrongPassword1!" }));
+        Assert.Null(await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = token, Password = "StrongPassword1!" }));
         Assert.Null((await fixture.Users.FindByIdAsync(originalAccount))?.PasswordHash);
         Assert.Null(invitation.ConsumedAt);
+    }
+
+    [Fact]
+    public async Task Activate_RepositorySuccess_ReturnsCommittedAccountEntity()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var gym = await fixture.Service.ProvisionAsync(new ProvisionGymRequest("repository", "North", "admin@example.com"));
+        var token = await fixture.GetTokenAsync();
+        using var scope = fixture.CreateScope();
+        var repository = scope.ServiceProvider.GetRequiredService<IActivationRepository>();
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(token)));
+
+        var result = Assert.IsType<Account>(await repository.ActivateAsync(hash, "StrongPassword1!", DateTimeOffset.UtcNow, default));
+
+        using var verification = fixture.CreateScope();
+        var persisted = await verification.ServiceProvider.GetRequiredService<StaticXDbContext>().Users.AsNoTracking().SingleAsync();
+        Assert.Equal((persisted.Id, gym, "admin@example.com", AccountRole.GymAdmin),
+            (result.Id, result.GymId, result.Email, result.Role));
+        Assert.True(persisted.EmailConfirmed);
+        Assert.NotNull((await verification.ServiceProvider.GetRequiredService<StaticXDbContext>()
+            .ActivationInvitations.AsNoTracking().SingleAsync()).ConsumedAt);
+    }
+
+    [Fact]
+    public async Task Activate_CommitFailure_ReturnsNoSuccessAndRollsBackActivation()
+    {
+        var interceptor = new FailingCommitInterceptor();
+        await using var fixture = await Fixture.CreateAsync(commitInterceptor: interceptor);
+        await fixture.Service.ProvisionAsync(new ProvisionGymRequest("commit-failure", "North", "admin@example.com"));
+        var token = await fixture.GetTokenAsync();
+        interceptor.Fail = true;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.ActivateAsync(
+            new ActivateAccountRequest { Token = token, Password = "StrongPassword1!" }));
+
+        using var verification = fixture.CreateScope();
+        var context = verification.ServiceProvider.GetRequiredService<StaticXDbContext>();
+        var account = await context.Users.AsNoTracking().SingleAsync();
+        Assert.False(account.EmailConfirmed);
+        Assert.Null(account.PasswordHash);
+        Assert.Null((await context.ActivationInvitations.AsNoTracking().SingleAsync()).ConsumedAt);
+        Assert.NotEmpty((await context.ActivationOutbox.AsNoTracking().SingleAsync()).ProtectedToken);
+    }
+
+    private sealed class FailingCommitInterceptor : DbTransactionInterceptor
+    {
+        public bool Fail { get; set; }
+
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(DbTransaction transaction,
+            TransactionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
+        {
+            if (Fail) throw new InvalidOperationException("Simulated activation commit failure.");
+            return ValueTask.FromResult(result);
+        }
     }
 
     [Fact]
@@ -186,16 +254,17 @@ public sealed class ActivationTests
         var secondService = second.ServiceProvider.GetRequiredService<IActivationService>();
 
         // SQLite can reject one simultaneous writer with SQLITE_LOCKED; it must not activate twice.
-        async Task<bool> Attempt(IActivationService service, string password)
+        async Task<ActivationResponse?> Attempt(IActivationService service, string password)
         {
             try { return await service.ActivateAsync(new ActivateAccountRequest { Token = token, Password = password }); }
-            catch (SqliteException ex) when (ex.SqliteErrorCode is 5 or 6) { return false; }
+            catch (SqliteException ex) when (ex.SqliteErrorCode is 5 or 6) { return null; }
         }
 
         var attempts = await Task.WhenAll(Attempt(firstService, "FirstPassword1!"),
             Attempt(secondService, "SecondPassword1!"));
-        Assert.Equal(1, attempts.Count(success => success));
+        var winner = Assert.Single(attempts.OfType<ActivationResponse>());
         var user = await fixture.Context.Users.AsNoTracking().SingleAsync();
+        Assert.Equal(user.GymId, winner.GymId);
         Assert.True(user.EmailConfirmed);
         Assert.Equal(1, await fixture.Context.ActivationInvitations.AsNoTracking()
             .CountAsync(i => i.ConsumedAt != null));
@@ -218,11 +287,12 @@ public sealed class ActivationTests
         var old = await fixture.Context.ActivationInvitations.SingleAsync(i => i.RevokedAt != null);
         Assert.NotNull(old.RevokedAt);
         Assert.Equal(string.Empty, (await fixture.Context.ActivationOutbox.AsNoTracking().SingleAsync(o => o.InvitationId == old.Id)).ProtectedToken);
-        Assert.False(await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = oldToken, Password = "StrongPassword1!" }));
+        Assert.Null(await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = oldToken, Password = "StrongPassword1!" }));
         var current = await fixture.Context.ActivationInvitations.SingleAsync(i => i.RevokedAt == null);
         var payload = await fixture.Context.ActivationOutbox.SingleAsync(o => o.InvitationId == current.Id);
         var token = fixture.Unprotect(current.Id, payload.ProtectedToken);
-        Assert.True(await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = token, Password = "StrongPassword1!" }));
+        Assert.Equal(gymId, Assert.IsType<ActivationResponse>(await fixture.Service.ActivateAsync(
+            new ActivateAccountRequest { Token = token, Password = "StrongPassword1!" })).GymId);
         Assert.False(await fixture.Service.ReissueAsync(gymId, accountId));
     }
 
@@ -278,10 +348,10 @@ public sealed class ActivationTests
         await using var fixture = await Fixture.CreateAsync();
         await fixture.Service.ProvisionAsync(new ProvisionGymRequest("request-a", "North", "admin@example.com"));
         using var second = fixture.CreateScope();
-        var store1 = fixture.CreateScope();
-        using (store1)
+        var repository1 = fixture.CreateScope();
+        using (repository1)
         {
-            var first = store1.ServiceProvider.GetRequiredService<IActivationDeliveryRepository>();
+            var first = repository1.ServiceProvider.GetRequiredService<IActivationDeliveryRepository>();
             var other = second.ServiceProvider.GetRequiredService<IActivationDeliveryRepository>();
             var now = DateTimeOffset.UtcNow;
             var lease = await first.LeaseDueAsync(now, default);
@@ -311,7 +381,7 @@ public sealed class ActivationTests
         var invitation = await fixture.Context.ActivationInvitations.SingleAsync();
         invitation.ExpiresAt = DateTime.UtcNow.AddMinutes(-1);
         await fixture.Context.SaveChangesAsync();
-        Assert.Null(await fixture.DeliveryStore.LeaseDueAsync(DateTimeOffset.UtcNow, default));
+        Assert.Null(await fixture.DeliveryRepository.LeaseDueAsync(DateTimeOffset.UtcNow, default));
         Assert.Equal(string.Empty, (await fixture.Context.ActivationOutbox.AsNoTracking().SingleAsync()).ProtectedToken);
     }
 
@@ -321,7 +391,7 @@ public sealed class ActivationTests
         await using var fixture = await Fixture.CreateAsync();
         await fixture.Service.ProvisionAsync(new ProvisionGymRequest("request-a", "North", "admin@example.com"));
         var sender = new FakeSender();
-        var dispatcher = new ActivationDispatcher(fixture.DeliveryStore, fixture.Protection,
+        var dispatcher = new ActivationDispatcher(fixture.DeliveryRepository, fixture.Protection,
             fixture.Configuration, TimeProvider.System, sender);
         await Assert.ThrowsAsync<InvalidOperationException>(() => dispatcher.DispatchOneAsync());
         Assert.Equal(0, (await fixture.Context.ActivationOutbox.AsNoTracking().SingleAsync()).AttemptCount);
@@ -345,7 +415,7 @@ public sealed class ActivationTests
         fixture.Configuration["Resend:FromAddress"] = "sender@example.com";
         fixture.Configuration["Activation:FrontendUrl"] = "https://app.example.com/activate";
         var sender = new FakeSender();
-        var dispatcher = new ActivationDispatcher(fixture.DeliveryStore, fixture.Protection,
+        var dispatcher = new ActivationDispatcher(fixture.DeliveryRepository, fixture.Protection,
             fixture.Configuration, TimeProvider.System, sender);
         Assert.True(await dispatcher.DispatchOneAsync());
         Assert.Equal(1, sender.Calls);
@@ -367,7 +437,7 @@ public sealed class ActivationTests
         fixture.Configuration["Activation:FrontendUrl"] = "https://app.example.com/activate";
         var clock = new MutableClock { Now = DateTimeOffset.UtcNow };
         var sender = new FakeSender { Accept = false };
-        var dispatcher = new ActivationDispatcher(fixture.DeliveryStore, fixture.Protection,
+        var dispatcher = new ActivationDispatcher(fixture.DeliveryRepository, fixture.Protection,
             fixture.Configuration, clock, sender);
         Assert.True(await dispatcher.DispatchOneAsync());
         var key = sender.Key;
@@ -387,7 +457,7 @@ public sealed class ActivationTests
         await using var fixture = await Fixture.CreateAsync();
         await fixture.Service.ProvisionAsync(new ProvisionGymRequest("request-a", "North", "admin@example.com"));
         var now = DateTimeOffset.UtcNow;
-        var first = await fixture.DeliveryStore.LeaseDueAsync(now, default);
+        var first = await fixture.DeliveryRepository.LeaseDueAsync(now, default);
         Assert.NotNull(first);
         using var otherScope = fixture.CreateScope();
         var other = otherScope.ServiceProvider.GetRequiredService<IActivationDeliveryRepository>();
@@ -395,8 +465,8 @@ public sealed class ActivationTests
         Assert.NotNull(reclaimed);
         Assert.Equal(first!.JobId, reclaimed!.JobId);
         Assert.NotEqual(first.LeaseOwner, reclaimed.LeaseOwner);
-        Assert.False(await fixture.DeliveryStore.IsCurrentAsync(first, now.AddMinutes(6), default));
-        await fixture.DeliveryStore.CompleteAsync(first, now.AddMinutes(6), true, default);
+        Assert.False(await fixture.DeliveryRepository.IsCurrentAsync(first, now.AddMinutes(6), default));
+        await fixture.DeliveryRepository.CompleteAsync(first, now.AddMinutes(6), true, default);
         Assert.Null((await fixture.Context.ActivationOutbox.AsNoTracking().SingleAsync()).SentAt);
     }
 
@@ -406,51 +476,94 @@ public sealed class ActivationTests
         public override DateTimeOffset GetUtcNow() => Now;
     }
 
-    [Fact]
-    public async Task LocalPickup_ConflictingCapturePreservesOutboxSecret_ThenRetriesSameJob()
+    [Theory]
+    [InlineData("before")]
+    [InlineData("at")]
+    [InlineData("after")]
+    public async Task Activate_ExpiryBoundary_OnlyStrictlyEarlierTokenCanBeConsumed(string boundary)
+    {
+        var clock = new MutableClock { Now = DateTimeOffset.UtcNow };
+        await using var fixture = await Fixture.CreateAsync(clock: clock);
+        await fixture.Service.ProvisionAsync(new ProvisionGymRequest("expiry", "Expiry", "admin@example.com"));
+        var token = await fixture.GetTokenAsync();
+        var expiry = (await fixture.Context.ActivationInvitations.AsNoTracking().SingleAsync()).ExpiresAt;
+        clock.Now = new DateTimeOffset(DateTime.SpecifyKind(expiry, DateTimeKind.Utc)).AddTicks(boundary == "before" ? -1 : boundary == "after" ? 1 : 0);
+        var activated = await fixture.Service.ActivateAsync(new ActivateAccountRequest { Token = token, Password = "StrongPassword1!" });
+        Assert.Equal(boundary == "before", activated is not null);
+        var account = await fixture.Context.Users.AsNoTracking().SingleAsync();
+        if (boundary == "before") Assert.Equal(account.GymId, Assert.IsType<ActivationResponse>(activated).GymId);
+        Assert.Equal(boundary == "before", account.EmailConfirmed);
+        Assert.Equal(boundary == "before", (await fixture.Context.ActivationInvitations.AsNoTracking().SingleAsync()).ConsumedAt != null);
+    }
+
+    [Theory]
+    [InlineData("gym-zero")]
+    [InlineData("gym-negative")]
+    [InlineData("account-null")]
+    [InlineData("account-blank")]
+    [InlineData("account-too-long")]
+    public async Task Reissue_InvalidTarget_RejectsWithoutPersistence(string scenario)
     {
         await using var fixture = await Fixture.CreateAsync();
-        await fixture.Service.ProvisionAsync(new ProvisionGymRequest("local-failure", "Local", "admin@example.invalid"));
-        var pickup = Path.Combine(Path.GetTempPath(), "static-x-pickup-retry-" + Guid.NewGuid().ToString("N"));
-        try
+        await Assert.ThrowsAsync<ArgumentException>(() => fixture.Service.ReissueAsync(
+            scenario == "gym-zero" ? 0 : scenario == "gym-negative" ? -1 : 1,
+            scenario == "account-null" ? null! : scenario == "account-blank" ? " " : scenario == "account-too-long" ? new string('a', 451) : "unknown"));
+        Assert.Equal(0, await fixture.Context.ActivationInvitations.CountAsync());
+        Assert.Equal(0, await fixture.Context.ActivationOutbox.CountAsync());
+    }
+
+    [Fact]
+    public async Task Reissue_NonAdministratorOrPasswordBearingAccount_DoesNotReplaceInvitation()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var gym = await fixture.Service.ProvisionAsync(new ProvisionGymRequest("pending", "Pending", "admin@example.com"));
+        var user = await fixture.Context.Users.SingleAsync();
+        user.Role = AccountRole.Trainer;
+        Assert.True((await fixture.Users.UpdateAsync(user)).Succeeded);
+        Assert.False(await fixture.Service.ReissueAsync(gym, user.Id));
+        user.Role = AccountRole.GymAdmin;
+        Assert.True((await fixture.Users.AddPasswordAsync(user, "StrongPassword1!")).Succeeded);
+        Assert.False(await fixture.Service.ReissueAsync(gym, user.Id));
+        Assert.Equal(1, await fixture.Context.ActivationInvitations.CountAsync());
+        Assert.Equal(0, await fixture.Context.ActivationInvitations.CountAsync(i => i.RevokedAt != null));
+        Assert.Equal(1, await fixture.Context.ActivationOutbox.CountAsync());
+    }
+
+    [Fact]
+    public async Task Worker_RealPendingOutbox_AutomaticallyDispatchesWithFakeProviderAndErasesSecret()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Configuration["Resend:ApiKey"] = "re_test_only";
+        fixture.Configuration["Resend:FromAddress"] = "sender@example.com";
+        fixture.Configuration["Activation:FrontendUrl"] = "https://app.example.com/activate";
+        await fixture.Service.ProvisionAsync(new ProvisionGymRequest("automatic", "Automatic", "admin@example.com"));
+        using var scope = fixture.CreateScope();
+        var clock = new IterationClock();
+        using var worker = new Static_X.API.Integrations.ActivationOutboxWorker(
+            scope.ServiceProvider.GetRequiredService<IServiceScopeFactory>(), clock,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Static_X.API.Integrations.ActivationOutboxWorker>.Instance);
+        await worker.StartAsync(default);
+        Assert.Equal(TimeSpan.FromSeconds(1), await clock.Delayed.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        await worker.StopAsync(default).WaitAsync(TimeSpan.FromSeconds(5));
+        var job = await fixture.Context.ActivationOutbox.AsNoTracking().SingleAsync();
+        Assert.NotNull(job.SentAt);
+        Assert.Empty(job.ProtectedToken);
+        Assert.Equal(1, job.AttemptCount);
+        var sender = scope.ServiceProvider.GetRequiredService<FakeSender>();
+        Assert.Equal(1, sender.Calls);
+        Assert.Equal("admin@example.com", sender.To);
+        Assert.Equal("activation/" + job.Id.ToString("N"), sender.Key);
+    }
+
+    private sealed class IterationClock : TimeProvider
+    {
+        public TaskCompletionSource<TimeSpan> Delayed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
         {
-            fixture.Configuration["Activation:DevelopmentPickupEnabled"] = "true";
-            fixture.Configuration["Activation:DevelopmentDatabaseConfirmed"] = "true";
-            fixture.Configuration["Activation:DevelopmentPickupPath"] = pickup;
-            fixture.Configuration["Activation:FrontendUrl"] = "https://localhost/activate";
-            var host = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
-            {
-                EnvironmentName = "Development", ContentRootPath = AppContext.BaseDirectory, DisableDefaults = true
-            });
-            var sender = new DevelopmentPickupEmailSender(fixture.Configuration, host.Environment);
-            var before = await fixture.Context.ActivationOutbox.AsNoTracking().SingleAsync();
-            var key = "activation/" + before.Id.ToString("N");
-            Assert.True(await sender.SendAsync(key, "", "other@example.invalid", "https://localhost/activate#activation=conflict", default));
-            var originalFile = await File.ReadAllTextAsync(Directory.GetFiles(pickup).Single());
-            var clock = new MutableClock { Now = DateTimeOffset.UtcNow };
-            var dispatcher = new ActivationDispatcher(fixture.DeliveryStore, fixture.Protection,
-                fixture.Configuration, clock, sender, requireResendConfiguration: false);
-            Assert.True(await dispatcher.DispatchOneAsync());
-            var failed = await fixture.Context.ActivationOutbox.AsNoTracking().SingleAsync();
-            Assert.Null(failed.SentAt);
-            Assert.Null(failed.LeaseOwner);
-            Assert.Equal(before.ProtectedToken, failed.ProtectedToken);
-            Assert.Equal(1, failed.AttemptCount);
-            Assert.True(failed.NextAttemptAt > clock.Now.UtcDateTime);
-            Assert.Equal(originalFile, await File.ReadAllTextAsync(Directory.GetFiles(pickup).Single()));
-            File.Delete(Directory.GetFiles(pickup).Single());
-            clock.Now = clock.Now.AddMinutes(2);
-            Assert.True(await dispatcher.DispatchOneAsync());
-            var delivered = await fixture.Context.ActivationOutbox.AsNoTracking().SingleAsync();
-            Assert.Equal(before.Id, delivered.Id);
-            Assert.Equal(2, delivered.AttemptCount);
-            Assert.NotNull(delivered.SentAt);
-            Assert.Empty(delivered.ProtectedToken);
-            using var record = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(Directory.GetFiles(pickup).Single()));
-            Assert.Equal(key, record.RootElement.GetProperty("IdempotencyKey").GetString());
-            Assert.Equal("admin@example.invalid", record.RootElement.GetProperty("Email").GetString());
+            var timer = base.CreateTimer(callback, state, Timeout.InfiniteTimeSpan, period);
+            Delayed.TrySetResult(dueTime);
+            return timer;
         }
-        finally { if (Directory.Exists(pickup)) Directory.Delete(pickup, true); }
     }
 
     private sealed class FakeSender : IActivationEmailSender
@@ -479,7 +592,7 @@ public sealed class ActivationTests
         public StaticXDbContext Context { get; }
         public UserManager<GymAccount> Users { get; }
         public IActivationService Service { get; }
-        public IActivationDeliveryRepository DeliveryStore => scope.ServiceProvider.GetRequiredService<IActivationDeliveryRepository>();
+        public IActivationDeliveryRepository DeliveryRepository => scope.ServiceProvider.GetRequiredService<IActivationDeliveryRepository>();
         public IConfiguration Configuration => scope.ServiceProvider.GetRequiredService<IConfiguration>();
         public IDataProtectionProvider Protection => protection;
         public string Unprotect(Guid id, string payload) =>
@@ -499,7 +612,8 @@ public sealed class ActivationTests
             protection = scope.ServiceProvider.GetRequiredService<IDataProtectionProvider>();
         }
 
-        public static async Task<Fixture> CreateAsync(bool configureKeyRing = true)
+        public static async Task<Fixture> CreateAsync(bool configureKeyRing = true, TimeProvider? clock = null,
+            DbTransactionInterceptor? commitInterceptor = null)
         {
             var path = Path.Combine(Path.GetTempPath(), "static-x-activation-tests", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(path);
@@ -511,16 +625,23 @@ public sealed class ActivationTests
             services.AddLogging();
             services.AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(
                 new Dictionary<string, string?> { ["Activation:KeyRingPath"] = configureKeyRing ? path : null }).Build());
-            services.AddSingleton(TimeProvider.System);
+            services.AddSingleton(clock ?? TimeProvider.System);
             services.AddDataProtection().SetApplicationName("Static-X.Activation")
                 .PersistKeysToFileSystem(new DirectoryInfo(path));
-            services.AddDbContext<StaticXDbContext>(o => o.UseSqlite(connectionString));
+            services.AddDbContext<StaticXDbContext>(o =>
+            {
+                o.UseSqlite(connectionString);
+                if (commitInterceptor is not null) o.AddInterceptors(commitInterceptor);
+            });
             services.AddIdentityCore<GymAccount>(o => o.User.RequireUniqueEmail = false)
                 .AddEntityFrameworkStores<StaticXDbContext>();
             services.AddScoped<IUserValidator<GymAccount>, RejectBlockedEmail>();
             services.AddScoped<IActivationRepository, ActivationRepository>();
             services.AddScoped<IActivationService, ActivationService>();
             services.AddScoped<IActivationDeliveryRepository, ActivationDeliveryRepository>();
+            services.AddScoped<IActivationDispatcher, ActivationDispatcher>();
+            services.AddSingleton<FakeSender>();
+            services.AddSingleton<IActivationEmailSender>(provider => provider.GetRequiredService<FakeSender>());
             var provider = services.BuildServiceProvider();
             var fixture = new Fixture(connection, provider, provider.CreateScope(), path);
             await fixture.Context.Database.EnsureCreatedAsync();

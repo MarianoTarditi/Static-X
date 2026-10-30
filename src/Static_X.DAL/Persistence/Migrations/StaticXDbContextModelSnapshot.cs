@@ -122,7 +122,7 @@ namespace DAL.Migrations
                     b.Property<bool>("EmailConfirmed")
                         .HasColumnType("bit");
 
-                    b.Property<int>("GymId")
+                    b.Property<int?>("GymId")
                         .HasColumnType("int");
 
                     b.Property<bool>("LockoutEnabled")
@@ -175,9 +175,17 @@ namespace DAL.Migrations
                         .HasFilter("[NormalizedUserName] IS NOT NULL");
 
                     b.HasIndex("GymId", "NormalizedEmail")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[GymId] IS NOT NULL");
 
-                    b.ToTable("AspNetUsers", (string)null);
+                    b.HasIndex(new[] { "NormalizedEmail" }, "GlobalEmailIndex")
+                        .IsUnique()
+                        .HasFilter("[GymId] IS NULL");
+
+                    b.ToTable("AspNetUsers", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AspNetUsers_RoleGym", "([Role] = 'SuperAdmin' AND [GymId] IS NULL) OR ([Role] IN ('GymAdmin', 'Trainer', 'Student') AND [GymId] IS NOT NULL)");
+                        });
                 });
 
             modelBuilder.Entity("DAL.ProvisioningRequest", b =>
@@ -353,8 +361,7 @@ namespace DAL.Migrations
                     b.HasOne("Entity.Gimnasio", null)
                         .WithMany()
                         .HasForeignKey("GymId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("DAL.ProvisioningRequest", b =>

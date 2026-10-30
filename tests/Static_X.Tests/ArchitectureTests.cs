@@ -100,12 +100,15 @@ public class ArchitectureTests
         AssertSignature<IStudentService>("DeactivateAsync", typeof(Task<StudentResponse>), typeof(int), typeof(int), typeof(CancellationToken));
         AssertSignature<IStudentService>("ReactivateAsync", typeof(Task<StudentResponse>), typeof(int), typeof(int), typeof(CancellationToken));
         AssertSignature<IAccountService>("CreateAsync", typeof(Task<AccountResponse>), typeof(int), typeof(CreateAccountRequest), typeof(AccountRole), typeof(CancellationToken));
-        AssertSignature<IAccountService>("SignInAsync", typeof(Task<AccountResponse>), typeof(int), typeof(LoginRequest), typeof(CancellationToken));
+        AssertSignature<IAccountService>("SignInAsync", typeof(Task<AccountResponse>), typeof(int?), typeof(LoginRequest), typeof(CancellationToken));
         AssertSignature<IAccountService>("FindByEmailAsync", typeof(Task<AccountResponse>), typeof(int), typeof(string), typeof(CancellationToken));
-        AssertSignature<IAccountService>("FindByIdAsync", typeof(Task<AccountResponse>), typeof(int), typeof(string), typeof(CancellationToken));
+        AssertSignature<IAccountService>("FindByIdAsync", typeof(Task<AccountResponse>), typeof(int?), typeof(string), typeof(CancellationToken));
         AssertSignature<IGymService>("AddAsync", typeof(Task<GymResponse>), typeof(CreateGymRequest), typeof(CancellationToken));
+        AssertSignature<IGymService>("ListAsync", typeof(Task<GymListResponse>), typeof(GymListRequest), typeof(CancellationToken));
+        AssertSignature<IGymService>("ListPendingAdministratorsAsync", typeof(Task<PendingAdministratorListResponse>), typeof(int), typeof(GymListRequest), typeof(CancellationToken));
+        Assert.Equal(new[] { "Page", "PageSize" }, typeof(GymListRequest).GetProperties().Select(property => property.Name).Order());
         AssertSignature<IActivationService>("ProvisionAsync", typeof(Task<int>), typeof(ProvisionGymRequest), typeof(CancellationToken));
-        AssertSignature<IActivationService>("ActivateAsync", typeof(Task<bool>), typeof(ActivateAccountRequest), typeof(CancellationToken));
+        AssertSignature<IActivationService>("ActivateAsync", typeof(Task<ActivationResponse>), typeof(ActivateAccountRequest), typeof(CancellationToken));
         AssertSignature<IActivationService>("ReissueAsync", typeof(Task<bool>), typeof(int), typeof(string), typeof(CancellationToken));
         AssertSignature<IActivationDispatcher>("DispatchOneAsync", typeof(Task<bool>), typeof(CancellationToken));
         Assert.Equal(new[] { "Email", "Password" }, typeof(CreateAccountRequest).GetProperties().Select(property => property.Name).Order());
@@ -150,7 +153,7 @@ public class ArchitectureTests
         var controllers = typeof(Program).Assembly.GetTypes().Where(type =>
             type.Namespace == "Static_X.API.Controllers").ToArray();
         Assert.Contains(controllers, type => type.Name == "StudentsController");
-        Assert.Contains(controllers, type => type.Name == "AccountController");
+        Assert.Contains(controllers, type => type.Name == "AuthenticationController");
         foreach (var type in controllers)
         {
             Assert.All(type.GetFields(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
@@ -211,6 +214,8 @@ public class ArchitectureTests
             .UseSetting("Activation:KeyRingPath", ""));
         using var first = factory.Services.CreateScope();
         using var second = factory.Services.CreateScope();
+        Assert.Single(factory.Services.GetServices<Microsoft.Extensions.Hosting.IHostedService>(),
+            service => service is Static_X.API.Integrations.ActivationOutboxWorker);
         foreach (var (contract, implementation) in Services)
         {
             var service = first.ServiceProvider.GetRequiredService(contract);
@@ -238,7 +243,7 @@ public class ArchitectureTests
         Assert.Same(configuration, second.ServiceProvider.GetRequiredService<IMapper>().ConfigurationProvider);
         configuration.AssertConfigurationIsValid();
         Assert.Equal("", factory.Services.GetRequiredService<IOptions<MapperConfigurationExpression>>().Value.LicenseKey);
-        Assert.Equal(new[] { "AccountProfile", "GymProfile", "StudentProfile" },
+        Assert.Equal(new[] { "AccountProfile", "AccountProfile", "GymProfile", "StudentProfile" },
             configuration.Internal().GetAllTypeMaps().Select(map => map.Profile.Name.Split('.').Last()).Order());
         var result = mapper.Map<StudentResponse>(new Alumno { Id = 73, Nombre = "DI name", Apellido = "DI surname", Email = "DI@EXAMPLE.COM" });
         Assert.Equal((73, "DI name", "DI surname", "DI@EXAMPLE.COM"),
@@ -277,6 +282,12 @@ public class ArchitectureTests
     [Fact]
     public void RepositoryContractsAndProviderAdapters_OccupyTheirOwningLayers()
     {
+        AssertSignature<IGymRepository>("ListAsync", typeof(Task<global::DAL.Repositories.Models.GymPage>), typeof(int), typeof(int), typeof(CancellationToken));
+        AssertSignature<IGymRepository>("ListPendingAdministratorsAsync", typeof(Task<global::DAL.Repositories.Models.PendingAdministratorPage>), typeof(int), typeof(int), typeof(int), typeof(CancellationToken));
+        Assert.Same(typeof(StaticXDbContext).Assembly, typeof(global::DAL.Repositories.Models.GymPage).Assembly);
+        Assert.Same(typeof(StaticXDbContext).Assembly, typeof(global::DAL.Repositories.Models.PendingAdministratorPage).Assembly);
+        Assert.Equal(typeof(IReadOnlyList<Gimnasio>), typeof(global::DAL.Repositories.Models.GymPage).GetProperty("Items")!.PropertyType);
+        Assert.Equal(typeof(IReadOnlyList<Account>), typeof(global::DAL.Repositories.Models.PendingAdministratorPage).GetProperty("Items")!.PropertyType);
         var ports = new[] { typeof(IAccountRepository), typeof(IGymRepository),
             typeof(IStudentRepository), typeof(IActivationRepository),
             typeof(IActivationDeliveryRepository) };
@@ -399,7 +410,8 @@ public class ArchitectureTests
         {
             "20261018181500_InicialAlumno", "20261019234555_AddGymStudentTenancy",
             "20261020000233_AddGymAccounts", "20261020002609_AddActivationProvisioning",
-            "20261020003316_AddActivationDeliveryRecovery", "20261027023459_AddStudentActiveState"
+            "20261020003316_AddActivationDeliveryRecovery", "20261027023459_AddStudentActiveState",
+            "20261028230341_AddGlobalSuperAdmin"
         }, migrations.Migrations.Keys);
         Assert.False(context.Database.HasPendingModelChanges());
         var script = context.GetService<IMigrator>().GenerateScript();
@@ -438,6 +450,31 @@ public class ArchitectureTests
         Assert.Equal("Static_X.API", environment.ApplicationName);
         Assert.Equal(Path.GetFullPath(Path.Combine(RepositoryRoot(), "src", "Static_X.API")),
             Path.GetFullPath(environment.ContentRootPath));
+    }
+
+    [Fact]
+    public void GlobalMigration_ChangesOnlyScopeIntegrityAndDoesNotSeedAccounts()
+    {
+        using var context = new StaticXDbContext(new DbContextOptionsBuilder<StaticXDbContext>()
+            .UseSqlServer("Server=unused;Database=unused;Integrated Security=true").Options);
+        var assembly = context.GetService<IMigrationsAssembly>();
+        var migration = assembly.CreateMigration(assembly.Migrations["20261028230341_AddGlobalSuperAdmin"], context.Database.ProviderName!);
+        Assert.Equal(5, migration.UpOperations.Count);
+        Assert.DoesNotContain(migration.UpOperations, operation => operation is Microsoft.EntityFrameworkCore.Migrations.Operations.InsertDataOperation or
+            Microsoft.EntityFrameworkCore.Migrations.Operations.UpdateDataOperation or Microsoft.EntityFrameworkCore.Migrations.Operations.DeleteDataOperation);
+        var column = Assert.Single(migration.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.AlterColumnOperation>());
+        Assert.Equal(("AspNetUsers", "GymId", true), (column.Table, column.Name, column.IsNullable));
+        var indexes = migration.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation>().ToArray();
+        Assert.Contains(indexes, index => index.Name == "GlobalEmailIndex" && index.IsUnique && index.Filter == "[GymId] IS NULL");
+        Assert.Contains(indexes, index => index.Name == "IX_AspNetUsers_GymId_NormalizedEmail" && index.IsUnique && index.Filter == "[GymId] IS NOT NULL");
+        var constraint = Assert.Single(migration.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.AddCheckConstraintOperation>());
+        Assert.Equal("CK_AspNetUsers_RoleGym", constraint.Name);
+        var rollback = context.GetService<IMigrator>().GenerateScript("20261028230341_AddGlobalSuperAdmin", "20261027023459_AddStudentActiveState");
+        Assert.Contains("THROW 51000", rollback);
+        Assert.DoesNotContain("SET [GymId] = 0", rollback);
+        Assert.Null(typeof(Program).Assembly.GetType("Static_X.API.ActivationCli"));
+        Assert.Null(typeof(Program).Assembly.GetType("Static_X.API.Integrations.DevelopmentPickupEmailSender"));
+        Assert.DoesNotContain(typeof(ActivationDispatcher).GetConstructors().Single().GetParameters(), parameter => parameter.ParameterType == typeof(bool));
     }
 
     private static string RepositoryRoot()

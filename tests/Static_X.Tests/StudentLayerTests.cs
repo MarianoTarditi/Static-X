@@ -249,17 +249,17 @@ public sealed class StudentLayerTests
             }
         };
         using var cancellation = new CancellationTokenSource();
-        await controller.Create(new CreateStudentRequest { Nombre = "Ana", Apellido = "Smith", Email = "ana@example.com" }, cancellation.Token);
+        await controller.CreateStudent(new CreateStudentRequest { Nombre = "Ana", Apellido = "Smith", Email = "ana@example.com" }, cancellation.Token);
         Assert.Equal(cancellation.Token, repository.Token);
         Assert.Equal(7, repository.Added?.GimnasioId);
-        await controller.List(new StudentListRequest(), cancellation.Token);
+        await controller.GetStudents(new StudentListRequest(), cancellation.Token);
         Assert.Equal(cancellation.Token, repository.Token);
         Assert.Equal(7, repository.Gym);
-        await controller.Find(23, cancellation.Token);
+        await controller.GetStudentById(23, cancellation.Token);
         Assert.Equal(cancellation.Token, repository.Token);
         Assert.Equal(7, repository.Gym);
         Assert.Equal(23, repository.Id);
-        var update = await controller.Update(23, new UpdateStudentRequest { Nombre = " Bea ", Apellido = " Jones ", Email = " bea@example.com " }, cancellation.Token);
+        var update = await controller.UpdateStudent(23, new UpdateStudentRequest { Nombre = " Bea ", Apellido = " Jones ", Email = " bea@example.com " }, cancellation.Token);
         var response = Assert.IsType<StudentResponse>(Assert.IsType<OkObjectResult>(update.Result).Value);
         Assert.Equal((23, "Bea", "Jones", "BEA@EXAMPLE.COM"), (response.Id, response.Nombre, response.Apellido, response.Email));
         Assert.Equal(cancellation.Token, repository.Token);
@@ -282,12 +282,12 @@ public sealed class StudentLayerTests
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) } }
         };
-        Assert.IsType<ForbidResult>((await controller.Create(new CreateStudentRequest(), default)).Result);
-        Assert.IsType<ForbidResult>((await controller.List(new StudentListRequest(), default)).Result);
-        Assert.IsType<ForbidResult>((await controller.Find(1, default)).Result);
-        Assert.IsType<ForbidResult>((await controller.Update(1, new UpdateStudentRequest(), default)).Result);
-        Assert.IsType<ForbidResult>((await controller.Deactivate(1, default)).Result);
-        Assert.IsType<ForbidResult>((await controller.Reactivate(1, default)).Result);
+        Assert.IsType<ForbidResult>((await controller.CreateStudent(new CreateStudentRequest(), default)).Result);
+        Assert.IsType<ForbidResult>((await controller.GetStudents(new StudentListRequest(), default)).Result);
+        Assert.IsType<ForbidResult>((await controller.GetStudentById(1, default)).Result);
+        Assert.IsType<ForbidResult>((await controller.UpdateStudent(1, new UpdateStudentRequest(), default)).Result);
+        Assert.IsType<ForbidResult>((await controller.DeactivateStudent(1, default)).Result);
+        Assert.IsType<ForbidResult>((await controller.ReactivateStudent(1, default)).Result);
         Assert.Equal(0, repository.Calls);
     }
 
@@ -471,16 +471,16 @@ public sealed class StudentLayerTests
             { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("gym_id", "7") }, "test")) } }
         };
         using var cancellation = new CancellationTokenSource();
-        var result = active ? await controller.Reactivate(23, cancellation.Token) : await controller.Deactivate(23, cancellation.Token);
+        var result = active ? await controller.ReactivateStudent(23, cancellation.Token) : await controller.DeactivateStudent(23, cancellation.Token);
         var response = Assert.IsType<StudentResponse>(Assert.IsType<OkObjectResult>(result.Result).Value);
         Assert.Equal((23, "Stored", "Name", "STORED@EXAMPLE.COM", !active),
             (response.Id, response.Nombre, response.Apellido, response.Email, response.Activo));
         Assert.Equal((7, 23, (bool?)active, cancellation.Token), (repository.Gym, repository.Id, repository.Active, repository.Token));
-        await controller.List(new StudentListRequest { Activo = active }, cancellation.Token);
+        await controller.GetStudents(new StudentListRequest { Activo = active }, cancellation.Token);
         Assert.Equal((7, (bool?)active, cancellation.Token), (repository.Gym, repository.Active, repository.Token));
         repository.Missing = true;
         Assert.Null(active ? await service.ReactivateAsync(7, 23) : await service.DeactivateAsync(7, 23));
-        var missing = active ? await controller.Reactivate(23, default) : await controller.Deactivate(23, default);
+        var missing = active ? await controller.ReactivateStudent(23, default) : await controller.DeactivateStudent(23, default);
         Assert.IsType<NotFoundObjectResult>(missing.Result);
         repository.Failure = new OperationCanceledException(cancellation.Token);
         await Assert.ThrowsAsync<OperationCanceledException>(() => active ? service.ReactivateAsync(7, 23, cancellation.Token) : service.DeactivateAsync(7, 23, cancellation.Token));

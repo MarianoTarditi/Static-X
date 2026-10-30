@@ -11,31 +11,15 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Static_X.API.Auth;
-using System.Globalization;
 using System.Security.Claims;
 using Microsoft.AspNetCore.DataProtection;
 using Resend;
-using Static_X.API;
 
-// Parse operator commands before constructing the HTTP host or touching configuration-backed services.
-var command = ActivationCli.Parse(args);
-if (command.IsInvalid)
-{
-    Console.Error.WriteLine("Invalid operator command or arguments. See Docs/ActivationOperations.md.");
-    Environment.ExitCode = 2;
-    return;
-}
-var builder = WebApplication.CreateBuilder(command.IsCommand ? Array.Empty<string>() : args);
+var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
 var connectionString = builder.Configuration.GetConnectionString("Static-X");
-if (command.IsCommand && !ActivationCli.IsConfigured(command, builder.Configuration, builder.Environment))
-{
-    Console.Error.WriteLine("Operator configuration is missing or unsafe.");
-    Environment.ExitCode = 2;
-    return;
-}
 if (connectionString is null)
     throw new InvalidOperationException("Connection string 'Static-X' was not found.");
 
@@ -86,8 +70,7 @@ builder.Services.ConfigureApplicationCookie(options =>
         if (context.Principal is null)
             return;
         var userId = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
-        var gymClaim = context.Principal?.FindFirstValue("gym_id");
-        if (userId is null || !int.TryParse(gymClaim, NumberStyles.None, CultureInfo.InvariantCulture, out var gymId) || gymId <= 0)
+        if (userId is null || !AccountScope.TryGetGymId(context.Principal!, out var gymId))
         {
             context.RejectPrincipal();
             return;
@@ -118,6 +101,7 @@ builder.Services.AddScoped<IActivationRepository, ActivationRepository>();
 builder.Services.AddScoped<IActivationService, ActivationService>();
 builder.Services.AddScoped<IActivationDeliveryRepository, ActivationDeliveryRepository>();
 builder.Services.AddScoped<IActivationDispatcher, ActivationDispatcher>();
+builder.Services.AddHostedService<Static_X.API.Integrations.ActivationOutboxWorker>();
 builder.Services.AddTransient<IActivationEmailSender, ResendActivationEmailSender>();
 builder.Services.AddHttpClient<ResendClient>();
 builder.Services.Configure<ResendClientOptions>(options =>
@@ -127,41 +111,11 @@ builder.Services.Configure<ResendClientOptions>(options =>
 });
 builder.Services.AddTransient<IResend, ResendClient>();
 
-if (command.Name == "dispatch-activation-local")
-{
-    // CLI operations must not leak SQL parameter values or provider diagnostics in Development.
-    builder.Logging.ClearProviders();
-    builder.Services.AddScoped<IActivationEmailSender, DevelopmentPickupEmailSender>();
-    builder.Services.AddScoped<IActivationDispatcher>(services => new ActivationDispatcher(
-        services.GetRequiredService<IActivationDeliveryRepository>(),
-        services.GetRequiredService<IDataProtectionProvider>(), builder.Configuration,
-        services.GetRequiredService<TimeProvider>(), services.GetRequiredService<IActivationEmailSender>(),
-        requireResendConfiguration: false));
-}
-
 builder.Services.AddControllersWithViews(options => options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute()));
 
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
-if (command.IsCommand)
-{
-    try
-    {
-        using var scope = app.Services.CreateScope();
-        var completed = await ActivationCli.ExecuteAsync(command, scope.ServiceProvider);
-        Console.WriteLine(completed ? "Operator command completed." : "No eligible operation was found.");
-        Environment.ExitCode = completed ? 0 : 3;
-    }
-    catch (Exception)
-    {
-        // Provider/database exceptions may include recipient addresses, tokens or connection details.
-        Console.Error.WriteLine("Operator command failed. Inspect restricted service diagnostics without exposing secrets.");
-        Environment.ExitCode = 1;
-    }
-    return;
-}
-
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -172,6 +126,14 @@ app.UseHttpsRedirection();
 
 app.UseWhen(context => context.Request.Path.StartsWithSegments("/api/students"), branch =>
     branch.UseMiddleware<Static_X.API.Middleware.StudentApiErrorsMiddleware>());
+
+// Apply only to the new administrative GET endpoints, including authorization short circuits.
+app.Use(async (context, next) =>
+{
+    if (context.GetEndpoint()?.Metadata.GetMetadata<Static_X.API.Filters.AdministrativeQueryResponseAttribute>() is not null)
+        context.Response.Headers.CacheControl = "no-store";
+    await next(context);
+});
 
 app.UseAuthentication();
 app.UseAuthorization();

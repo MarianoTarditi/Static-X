@@ -6,7 +6,7 @@ using BLL.DTOs.Accounts;
 
 namespace BLL;
 
-/// <summary>Valida las operaciones de cuentas y delega su creación, consulta y autenticación por gimnasio.</summary>
+/// <summary>Valida cuentas de gimnasio y autentica identidades con ámbito de gimnasio o global explícito.</summary>
 public sealed class AccountService : IAccountService
 {
     private readonly IAccountRepository repository;
@@ -25,7 +25,7 @@ public sealed class AccountService : IAccountService
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(gymId);
         ArgumentNullException.ThrowIfNull(request);
-        if (!Enum.IsDefined(role))
+        if (!Enum.IsDefined(role) || role == AccountRole.SuperAdmin)
             throw new ArgumentOutOfRangeException(nameof(role));
         if (string.IsNullOrWhiteSpace(request.Password))
             throw new ArgumentException("A password is required.", "password");
@@ -39,8 +39,8 @@ public sealed class AccountService : IAccountService
         return mapper.Map<AccountResponse?>(await repository.FindByEmailAsync(gymId, RequiredEmail(email), cancellationToken));
     }
 
-    /// <summary>Descarta credenciales incompletas y delega el inicio de sesión para el gimnasio indicado.</summary>
-    public async Task<AccountResponse?> SignInAsync(int gymId, LoginRequest request,
+    /// <summary>Valida las credenciales y selecciona únicamente el ámbito global o el gimnasio indicado.</summary>
+    public async Task<AccountResponse?> SignInAsync(int? gymId, LoginRequest request,
         CancellationToken cancellationToken = default)
     {
         if (gymId <= 0 || request is null || string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
@@ -49,8 +49,8 @@ public sealed class AccountService : IAccountService
         return mapper.Map<AccountResponse?>(await repository.SignInAsync(gymId, request.Email.Trim(), request.Password, cancellationToken));
     }
 
-    /// <summary>Descarta identificadores inválidos y solicita la cuenta confirmada del gimnasio indicado.</summary>
-    public async Task<AccountResponse?> FindByIdAsync(int gymId, string accountId, CancellationToken cancellationToken = default)
+    /// <summary>Consulta una cuenta confirmada dentro del ámbito global o del gimnasio confiable indicado.</summary>
+    public async Task<AccountResponse?> FindByIdAsync(int? gymId, string accountId, CancellationToken cancellationToken = default)
     {
         if (gymId <= 0 || string.IsNullOrWhiteSpace(accountId))
             return null;

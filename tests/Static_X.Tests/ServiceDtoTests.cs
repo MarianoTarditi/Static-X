@@ -142,8 +142,26 @@ public sealed class ServiceDtoTests
         Assert.Null(repository.Added);
     }
 
+    [Fact]
+    public async Task Account_GlobalSelector_MapsNullGymAndIgnoresDtoGymForTrustedScope()
+    {
+        var repository = new Accounts { Result = new Account("global", null, "global@example.com", AccountRole.SuperAdmin) };
+        var service = new AccountService(repository, TestMapper.Instance);
+        var result = await service.SignInAsync(null, new LoginRequest { GymId = 999, Email = " global@example.com ", Password = "GlobalPassword1!" });
+        Assert.Null(repository.Gym);
+        Assert.Equal("global@example.com", repository.Email);
+        Assert.Null(result!.GymId);
+        Assert.Equal(AccountRole.SuperAdmin, result.Role);
+        Assert.Equal("global", result.Id);
+        Assert.Equal("global", (await service.FindByIdAsync(null, "global"))!.Id);
+        Assert.Null(repository.Gym);
+    }
+
     private sealed class Gyms : IGymRepository
     {
+        public Task<global::DAL.Repositories.Models.GymPage> ListAsync(int offset, int pageSize, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<global::DAL.Repositories.Models.PendingAdministratorPage?> ListPendingAdministratorsAsync(int gymId, int offset, int pageSize, CancellationToken cancellationToken) => throw new NotSupportedException();
+
         public Gimnasio? Added { get; private set; }
         public CancellationToken Token { get; private set; }
 
@@ -159,7 +177,7 @@ public sealed class ServiceDtoTests
     {
         public Account? Result { get; init; }
         public string? Operation { get; private set; }
-        public int Gym { get; private set; }
+        public int? Gym { get; private set; }
         public string? Email { get; private set; }
         public string? Password { get; private set; }
         public string? AccountId { get; private set; }
@@ -180,20 +198,20 @@ public sealed class ServiceDtoTests
             return Task.FromResult(Result);
         }
 
-        public Task<Account?> SignInAsync(int gymId, string email, string password, CancellationToken cancellationToken)
+        public Task<Account?> SignInAsync(int? gymId, string email, string password, CancellationToken cancellationToken)
         {
             Capture("signin", gymId, email, password, cancellationToken);
             return Task.FromResult(Result);
         }
 
-        public Task<Account?> FindByIdAsync(int gymId, string accountId, CancellationToken cancellationToken)
+        public Task<Account?> FindByIdAsync(int? gymId, string accountId, CancellationToken cancellationToken)
         {
             Capture("id", gymId, null, null, cancellationToken);
             AccountId = accountId;
             return Task.FromResult(Result);
         }
 
-        private void Capture(string operation, int gym, string? email, string? password, CancellationToken token)
+        private void Capture(string operation, int? gym, string? email, string? password, CancellationToken token)
         {
             Operation = operation;
             Gym = gym;

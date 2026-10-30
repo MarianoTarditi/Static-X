@@ -1,5 +1,6 @@
 using AutoMapper;
 using BLL.DTOs.Accounts;
+using BLL.DTOs.Gyms;
 using Entity;
 
 namespace BLL.Mappings;
@@ -15,5 +16,8 @@ public sealed class AccountProfile : Profile
             .ForCtorParam("GymId", options => options.MapFrom(source => source.GymId))
             .ForCtorParam("Email", options => options.MapFrom(source => source.Email))
             .ForCtorParam("Role", options => options.MapFrom(source => source.Role));
+        CreateMap<Account, PendingAdministratorResponse>()
+            .ForCtorParam("accountId", options => options.MapFrom(source => source.Id))
+            .ForCtorParam("email", options => options.MapFrom(source => source.Email));
     }
 }

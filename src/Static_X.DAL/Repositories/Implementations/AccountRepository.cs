@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DAL.Repositories.Implementation;
 
-/// <summary>Gestiona la persistencia y las consultas de cuentas por gimnasio y delega la autenticación en Identity.</summary>
+/// <summary>Persiste cuentas de gimnasio y autentica identidades con ámbito global o de gimnasio mediante Identity.</summary>
 public sealed class AccountRepository(StaticXDbContext context, UserManager<GymAccount> users,
     SignInManager<GymAccount> signIn) : IAccountRepository
 {
@@ -14,6 +14,8 @@ public sealed class AccountRepository(StaticXDbContext context, UserManager<GymA
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (gymId <= 0 || !Enum.IsDefined(role) || role == AccountRole.SuperAdmin)
+            throw new ArgumentOutOfRangeException(nameof(role));
         var id = Guid.NewGuid().ToString("N");
         var user = new GymAccount
         {
@@ -41,22 +43,24 @@ public sealed class AccountRepository(StaticXDbContext context, UserManager<GymA
         return user;
     }
 
-    /// <summary>Consulta sin seguimiento una cuenta por identificador y gimnasio solo si su correo está confirmado.</summary>
-    public async Task<Account?> FindByIdAsync(int gymId, string accountId, CancellationToken cancellationToken)
+    /// <summary>Consulta una cuenta confirmada por identificador dentro del ámbito global o de gimnasio seleccionado.</summary>
+    public async Task<Account?> FindByIdAsync(int? gymId, string accountId, CancellationToken cancellationToken)
     {
         var user = await context.Users.AsNoTracking()
-            .SingleOrDefaultAsync(u => u.Id == accountId && u.GymId == gymId && u.EmailConfirmed,
+            .SingleOrDefaultAsync(u => u.Id == accountId && u.GymId == gymId && u.EmailConfirmed &&
+                (gymId != null || u.Role == AccountRole.SuperAdmin),
                 cancellationToken);
         return user is null ? null : new Account(user.Id, user.GymId, user.Email!, user.Role);
     }
 
-    /// <summary>Busca la cuenta por gimnasio y correo normalizado y solicita a Identity iniciar sesión con control de bloqueo por fallos.</summary>
-    public async Task<Account?> SignInAsync(int gymId, string email, string password,
+    /// <summary>Autentica por correo normalizado y ámbito explícito mediante Identity con control de bloqueo por fallos.</summary>
+    public async Task<Account?> SignInAsync(int? gymId, string email, string password,
         CancellationToken cancellationToken)
     {
         var normalized = users.NormalizeEmail(email);
         var user = await context.Users.SingleOrDefaultAsync(
-            u => u.GymId == gymId && u.NormalizedEmail == normalized, cancellationToken);
+            u => u.GymId == gymId && u.NormalizedEmail == normalized &&
+                (gymId != null || u.Role == AccountRole.SuperAdmin), cancellationToken);
         if (user is null)
             return null;
 

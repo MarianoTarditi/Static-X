@@ -12,7 +12,8 @@ public sealed class GymClaimsPrincipalFactory(
     protected override async Task<ClaimsIdentity> GenerateClaimsAsync(GymAccount user)
     {
         var identity = await base.GenerateClaimsAsync(user);
-        identity.AddClaim(new Claim("gym_id", user.GymId.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        if (user.GymId is int gymId)
+            identity.AddClaim(new Claim("gym_id", gymId.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         identity.AddClaim(new Claim(ClaimTypes.Role, user.Role.ToString()));
         return identity;
     }

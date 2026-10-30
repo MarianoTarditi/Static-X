@@ -11,15 +11,15 @@ namespace BLL;
 /// <summary>Valida las solicitudes de activación y prepara invitaciones protegidas para su persistencia.</summary>
 public sealed class ActivationService : IActivationService
 {
-    private readonly IActivationRepository store;
+    private readonly IActivationRepository repository;
     private readonly IDataProtectionProvider protection;
     private readonly IConfiguration configuration;
     private readonly TimeProvider clock;
 
     /// <summary>Recibe la persistencia, la protección de tokens, la configuración y el reloj de activación.</summary>
-    public ActivationService(IActivationRepository store, IDataProtectionProvider protection, IConfiguration configuration, TimeProvider clock)
+    public ActivationService(IActivationRepository repository, IDataProtectionProvider protection, IConfiguration configuration, TimeProvider clock)
     {
-        this.store = store;
+        this.repository = repository;
         this.protection = protection;
         this.configuration = configuration;
         this.clock = clock;
@@ -35,7 +35,8 @@ public sealed class ActivationService : IActivationService
         var gymName = request.GymName;
         var email = request.Email;
         if (string.IsNullOrWhiteSpace(key) || key.Length > 128 || string.IsNullOrWhiteSpace(gymName)
-            || gymName.Length > 200 || string.IsNullOrWhiteSpace(email) || email.Length > 256)
+            || gymName.Length > 200 || string.IsNullOrWhiteSpace(email) || email.Length > 256 ||
+            !System.Net.Mail.MailAddress.TryCreate(email.Trim(), out var address) || address.Address != email.Trim())
             throw new ArgumentException("Invalid provisioning input.");
 
         var id = Guid.NewGuid();
@@ -44,28 +45,36 @@ public sealed class ActivationService : IActivationService
         var protectedToken = protection.CreateProtector("Static-X.ActivationDelivery.v1", id.ToString("N"))
             .Protect(token);
         var now = clock.GetUtcNow();
-        return await store.ProvisionAsync(key, gymName.Trim(), email.Trim(), hash, id,
-            protectedToken, now, now.AddHours(24), ct);
+        try
+        {
+            return await repository.ProvisionAsync(key, gymName.Trim(), email.Trim(), hash, id,
+                protectedToken, now, now.AddHours(24), ct);
+        }
+        catch (DAL.Repositories.Exceptions.ProvisioningConflictException)
+        {
+            throw new BLL.Exceptions.ProvisioningConflictException();
+        }
     }
 
     // Comprueba el formato del token y la presencia de contraseña antes de solicitar la activación mediante su hash.
-    /// <summary>Rechaza credenciales incompletas y activa la invitación válida mediante el hash del token.</summary>
-    public Task<bool> ActivateAsync(ActivateAccountRequest request, CancellationToken ct = default)
+    /// <summary>Valida las credenciales y devuelve el gimnasio de la cuenta cuya activación fue confirmada.</summary>
+    public async Task<ActivationResponse?> ActivateAsync(ActivateAccountRequest request, CancellationToken ct = default)
     {
-        if (request is null) return Task.FromResult(false);
+        if (request is null) return null;
         var token = request.Token;
         var password = request.Password;
         if (string.IsNullOrWhiteSpace(token) || token.Length != 64 ||
             !token.All(Uri.IsHexDigit) || string.IsNullOrWhiteSpace(password))
-            return Task.FromResult(false);
-        return store.ActivateAsync(Hash(token.ToUpperInvariant()), password, clock.GetUtcNow(), ct);
+            return null;
+        var account = await repository.ActivateAsync(Hash(token.ToUpperInvariant()), password, clock.GetUtcNow(), ct);
+        return account?.GymId is int gymId && gymId > 0 ? new ActivationResponse(gymId) : null;
     }
 
     // Genera un nuevo token protegido y solicita reemplazar la invitación de la cuenta y el gimnasio indicados
     /// <summary>Reemite una invitación para la cuenta y el gimnasio identificados por el operador.</summary>
     public async Task<bool> ReissueAsync(int gymId, string accountId, CancellationToken ct = default)
     {
-        if (gymId <= 0 || string.IsNullOrWhiteSpace(accountId))
+        if (gymId <= 0 || string.IsNullOrWhiteSpace(accountId) || accountId.Length > 450)
             throw new ArgumentException("A gym and account are required.");
         RequireKeyRing();
         var id = Guid.NewGuid();
@@ -73,7 +82,7 @@ public sealed class ActivationService : IActivationService
         var protectedToken = protection.CreateProtector("Static-X.ActivationDelivery.v1", id.ToString("N"))
             .Protect(token);
         var now = clock.GetUtcNow();
-        return await store.ReissueAsync(gymId, accountId, Hash(token), id, protectedToken,
+        return await repository.ReissueAsync(gymId, accountId, Hash(token), id, protectedToken,
             now, now.AddHours(24), ct);
     }
 

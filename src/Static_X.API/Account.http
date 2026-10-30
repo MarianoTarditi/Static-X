@@ -17,3 +17,17 @@ X-CSRF-TOKEN: <token-from-csrf-response>
 
 ### Send the identity cookie obtained at login in the same client session.
 GET {{baseUrl}}/api/account/me
+
+### Refresh CSRF after login; use the authenticated token below, not the pre-login token.
+GET {{baseUrl}}/api/account/csrf
+
+### Logout only this client: send both cookies and the authenticated CSRF token, with no body.
+### Expected: empty 204, no-store, expired application cookie. Other sessions remain valid.
+POST {{baseUrl}}/api/account/logout
+X-CSRF-TOKEN: <authenticated-token-from-csrf-response>
+
+### Expected: 401 after this client processes the logout Set-Cookie response.
+GET {{baseUrl}}/api/account/me
+
+### Before another login, fetch a fresh anonymous CSRF token; refresh again after login.
+GET {{baseUrl}}/api/account/csrf
