@@ -31,7 +31,7 @@ using Xunit;
 
 namespace Static_X.Tests;
 
-public sealed class AccountHttpTests
+public sealed partial class AccountHttpTests
 {
     [Theory]
     [InlineData(AccountRole.SuperAdmin)]
@@ -534,7 +534,8 @@ public sealed class AccountHttpTests
     [Fact]
     public async Task ProvisionAndReissue_GlobalCaller_RequiresCsrfAndPreservesIdempotencyAndPendingActivation()
     {
-        await using var app = await TestApp.CreateAsync(activation: true);
+        var clock = new InvitationClock();
+        await using var app = await TestApp.CreateAsync(activation: true, clock: clock);
         var globalId = await app.CreateGlobalAsync("global@example.com", "GlobalPassword1!");
         using var client = app.Client();
         Assert.Equal(HttpStatusCode.OK, (await app.LoginAsync(client, null, "global@example.com", "GlobalPassword1!")).StatusCode);
@@ -561,6 +562,7 @@ public sealed class AccountHttpTests
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(route, new { })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await app.PostAsync(client, $"/api/gyms/{gym + 1}/administrators/{account.Id}/invitation", new { })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await app.PostAsync(client, $"/api/gyms/{gym}/administrators/{globalId}/invitation", new { })).StatusCode);
+        clock.Now = clock.Now.AddHours(1);
         Assert.Equal(HttpStatusCode.NoContent, (await app.PostAsync(client, route, null)).StatusCode);
         var current = await context.ActivationInvitations.AsNoTracking().SingleAsync(i => i.RevokedAt == null);
         Assert.Equal(1, await context.ActivationInvitations.CountAsync(i => i.RevokedAt != null));
@@ -857,13 +859,18 @@ public sealed class AccountHttpTests
             this.activationKeys = activationKeys;
         }
 
-        public static async Task<TestApp> CreateAsync(bool activation = false, bool failPersistence = false, bool failQueries = false)
+        public static async Task<TestApp> CreateAsync(bool activation = false, bool failPersistence = false, bool failQueries = false,
+            TimeProvider? clock = null, bool recoveryConcurrency = false, BLL.Interfaces.IPasswordRecoveryEmailSender? recoverySender = null,
+            Microsoft.EntityFrameworkCore.Diagnostics.DbTransactionInterceptor? tenantCommitInterceptor = null,
+            Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor? tenantSaveInterceptor = null)
         {
             var keys = activation
                 ? Path.Combine(Path.GetTempPath(), "static-x-activation-http", Guid.NewGuid().ToString("N"))
                 : null;
             if (keys is not null) Directory.CreateDirectory(keys);
-            var connection = new SqliteConnection("Data Source=:memory:");
+            var connection = new SqliteConnection(recoveryConcurrency
+                ? "Data Source=" + Path.Combine(keys!, "recovery.sqlite") + ";Default Timeout=10;Pooling=False"
+                : "Data Source=:memory:");
             await connection.OpenAsync();
             var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
                 builder.UseEnvironment("Development")
@@ -874,9 +881,26 @@ public sealed class AccountHttpTests
                 .UseSetting("Resend:FromAddress", "")
                 .ConfigureServices(services =>
                 {
+                    // Worker lifecycle tests start it explicitly after the isolated database is initialized.
+                    foreach (var worker in services.Where(d => d.ImplementationType == typeof(Static_X.API.Integrations.PasswordRecoveryOutboxWorker)).ToArray())
+                        services.Remove(worker);
                     services.RemoveAll<DbContextOptions<StaticXDbContext>>();
                     services.RemoveAll<IDbContextOptionsConfiguration<StaticXDbContext>>();
-                    services.AddDbContext<StaticXDbContext>(options => options.UseSqlite(connection));
+                    services.AddDbContext<StaticXDbContext>(options =>
+                    {
+                        if (recoveryConcurrency) options.UseSqlite(connection.ConnectionString);
+                        else options.UseSqlite(connection);
+                        if (tenantCommitInterceptor is not null) options.AddInterceptors(tenantCommitInterceptor);
+                        if (tenantSaveInterceptor is not null) options.AddInterceptors(tenantSaveInterceptor);
+                    });
+                    services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter, RecoveryTestAddressFilter>();
+                    if (recoverySender is not null) services.AddSingleton(recoverySender);
+                    if (clock is not null)
+                    {
+                        services.AddSingleton(clock);
+                        services.Configure<CookieAuthenticationOptions>(IdentityConstants.ApplicationScheme, options => options.TimeProvider = clock);
+                        services.Configure<SecurityStampValidatorOptions>(options => options.TimeProvider = clock);
+                    }
                     if (failPersistence) services.AddScoped<IActivationRepository, FaultingActivationRepository>();
                     if (failQueries) services.AddScoped<IGymRepository, FaultingGymRepository>();
                 }));
@@ -996,6 +1020,7 @@ public sealed class AccountHttpTests
 
         private sealed class FaultingActivationRepository : IActivationRepository
         {
+            public Task<Entity.Account?> InviteAsync(int gymId, string key, string email, Entity.AccountRole role, int? studentId, string tokenHash, Guid invitationId, string protectedToken, DateTimeOffset now, DateTimeOffset expiresAt, CancellationToken cancellationToken) => throw new NotSupportedException();
             public Task<int> ProvisionAsync(string key, string gymName, string email, string tokenHash, Guid invitationId,
                 string protectedToken, DateTimeOffset now, DateTimeOffset expiresAt, CancellationToken cancellationToken) =>
                 throw new InvalidDataException("private-database-detail");

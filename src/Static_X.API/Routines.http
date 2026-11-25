@@ -1,0 +1,65 @@
+@baseUrl = https://localhost:7226
+@studentId = 1
+@missingStudentId = 2147483647
+@csrf = paste-the-token-for-the-current-trainer-session
+@revision = paste-the-current-revision-from-the-trainer-read
+
+# Sign in using Account.http. Obtain a fresh CSRF token after switching sessions.
+
+### Trainer: read the current routine, or receive {"routine":null}
+GET {{baseUrl}}/api/students/{{studentId}}/routine
+
+### Trainer: fetch the CSRF token for the current cookie
+GET {{baseUrl}}/api/account/csrf
+
+### Trainer: first publication without optional metadata (201; repeat with null returns 409)
+PUT {{baseUrl}}/api/students/{{studentId}}/routine
+Content-Type: application/json
+X-CSRF-TOKEN: {{csrf}}
+
+{
+  "expectedRevision": null,
+  "days": [
+    { "exercises": [{ "name": "Goblet squat", "sets": 3, "repetitions": 10, "restSeconds": 60 }] },
+    { "exercises": [{ "name": "Dumbbell row", "sets": 3, "repetitions": 8, "notes": "Keep a steady tempo." }] }
+  ]
+}
+
+### Trainer: full replacement with metadata (200 for current revision; 409 for stale revision)
+# Both reads return the saved metadata. Omit a metadata field or send null to clear it.
+PUT {{baseUrl}}/api/students/{{studentId}}/routine
+Content-Type: application/json
+X-CSRF-TOKEN: {{csrf}}
+
+{
+  "expectedRevision": "{{revision}}",
+  "title": "Strength block",
+  "instructions": "Warm up before each session.",
+  "days": [
+    {
+      "name": "Lower body",
+      "instructions": "Start with lighter sets.",
+      "exercises": [
+        { "name": "Split squat", "sets": 3, "repetitions": 8 },
+        { "name": "Plank", "sets": 3, "durationSeconds": 45, "restSeconds": 20 }
+      ]
+    }
+  ]
+}
+
+### Trainer: invalid target combination (400; current routine remains unchanged)
+# Supply exactly one positive target per set; omit or null the other. Rest is separate.
+PUT {{baseUrl}}/api/students/{{studentId}}/routine
+Content-Type: application/json
+X-CSRF-TOKEN: {{csrf}}
+
+{
+  "expectedRevision": "{{revision}}",
+  "days": [{ "exercises": [{ "name": "Plank", "sets": 3, "repetitions": 8, "durationSeconds": 45 }] }]
+}
+
+### Trainer: a missing or out-of-gym profile returns 404
+GET {{baseUrl}}/api/students/{{missingStudentId}}/routine
+
+### Student: switch to a student session; live coverage is required (403 without it)
+GET {{baseUrl}}/api/student/me/routine

@@ -1,0 +1,17 @@
+@baseUrl = https://localhost:7226
+@accountId = opaque-trainer-id
+@csrfToken = authenticated-session-token
+
+### Use an existing GymAdmin cookie session. GET requires no CSRF header.
+GET {{baseUrl}}/api/trainers?page=1&pageSize=20
+
+### Obtain a fresh token after login; do not log it.
+GET {{baseUrl}}/api/account/csrf
+
+### Disable a same-gym Trainer (bodyless, 204); old cookies fail on their next request.
+PATCH {{baseUrl}}/api/trainers/{{accountId}}/deactivate
+X-CSRF-TOKEN: {{csrfToken}}
+
+### Restore access (bodyless, 204), not old cookies, confirmation or credentials.
+PATCH {{baseUrl}}/api/trainers/{{accountId}}/reactivate
+X-CSRF-TOKEN: {{csrfToken}}

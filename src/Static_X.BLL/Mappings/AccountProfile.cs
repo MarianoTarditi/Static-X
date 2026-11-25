@@ -5,10 +5,10 @@ using Entity;
 
 namespace BLL.Mappings;
 
-/// <summary>Define la conversión de la cuenta de dominio a su identidad pública sin credenciales.</summary>
+/// <summary>Define respuestas públicas de cuentas y proyecciones administrativas de entrenadores sin credenciales.</summary>
 public sealed class AccountProfile : Profile
 {
-    /// <summary>Configura los parámetros del constructor de la respuesta a partir de la cuenta de dominio.</summary>
+    /// <summary>Configura los constructores de respuesta a partir de cuentas y proyecciones seguras persistidas.</summary>
     public AccountProfile()
     {
         CreateMap<Account, AccountResponse>()
@@ -19,5 +19,10 @@ public sealed class AccountProfile : Profile
         CreateMap<Account, PendingAdministratorResponse>()
             .ForCtorParam("accountId", options => options.MapFrom(source => source.Id))
             .ForCtorParam("email", options => options.MapFrom(source => source.Email));
+        CreateMap<TrainerAccountProjection, TrainerResponse>()
+            .ForCtorParam("accountId", options => options.MapFrom(source => source.AccountId))
+            .ForCtorParam("email", options => options.MapFrom(source => source.Email))
+            .ForCtorParam("isEnabled", options => options.MapFrom(source => source.IsEnabled))
+            .ForCtorParam("emailConfirmed", options => options.MapFrom(source => source.EmailConfirmed));
     }
 }

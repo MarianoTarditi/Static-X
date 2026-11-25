@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Activate your account | Static-X</title>
+    <script src="/activate/activation.js"></script>
+    <link rel="stylesheet" href="/activate/activation.css">
+</head>
+<body>
+    <main>
+        <p class="brand">Static-X <span> / </span> Account setup</p>
+        <h1>Activate your account</h1>
+        <p>Choose a password to finish accepting your invitation.</p>
+        <noscript><p>Activation requires JavaScript. Enable it and reopen the link from your invitation email.</p></noscript>
+        <form id="activation-form" method="post">
+            <fieldset id="activation-fields" disabled>
+                <label for="new-password">New password</label>
+                <input id="new-password" type="password" autocomplete="new-password" required>
+                <button type="submit">Activate account</button>
+            </fieldset>
+        </form>
+        <p id="activation-status" role="status" aria-atomic="true"></p>
+    </main>
+</body>
+</html>

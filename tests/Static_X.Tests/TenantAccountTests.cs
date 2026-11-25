@@ -6,6 +6,8 @@ using DAL;
 using Entity;
 using DAL.Repositories.Implementation;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,6 +17,92 @@ namespace Static_X.Tests;
 
 public sealed class TenantAccountTests
 {
+    [Theory]
+    [InlineData("wrong-gym")]
+    [InlineData("global-selector")]
+    [InlineData("unconfirmed")]
+    [InlineData("missing")]
+    [InlineData("zero-gym")]
+    [InlineData("negative-gym")]
+    public async Task ChangePassword_Repository_RequiresMatchingConfirmedPersistedScope(string scenario)
+    {
+        await using var db = await AccountDatabase.CreateAsync();
+        var gym = await db.Gyms.AddAsync(new CreateGymRequest("First"));
+        var account = await db.Accounts.CreateAsync(gym.Id, new CreateAccountRequest("scope@example.invalid", "CorrectPassword1!"), AccountRole.Student);
+        var user = (await db.Users.FindByIdAsync(account.Id))!;
+        user.EmailConfirmed = scenario != "unconfirmed";
+        Assert.True((await db.Users.UpdateAsync(user)).Succeeded);
+        var before = System.Text.Json.JsonSerializer.Serialize(user);
+        var repository = new AccountRepository(db.Context, db.Users, db.SignIn, db.Protection);
+        int? scope = scenario == "wrong-gym" ? gym.Id + 1 : scenario == "global-selector" ? null : scenario == "zero-gym" ? 0 : scenario == "negative-gym" ? -1 : gym.Id;
+
+        Assert.False(await repository.ChangePasswordAsync(scope, scenario == "missing" ? "missing-id" : account.Id,
+            "CorrectPassword1!", "NewPassword2!", default));
+
+        db.Context.ChangeTracker.Clear();
+        Assert.True(before == System.Text.Json.JsonSerializer.Serialize(await db.Context.Users.SingleAsync()), "Rejected scope must not mutate persisted account state.");
+    }
+
+    [Fact]
+    public async Task ChangePassword_Repository_ConcurrencyConflictDoesNotPersistHashOrStamp()
+    {
+        await using var db = await AccountDatabase.CreateAsync();
+        var gym = await db.Gyms.AddAsync(new CreateGymRequest("First"));
+        var account = await db.Accounts.CreateAsync(gym.Id, new CreateAccountRequest("concurrent@example.invalid", "CorrectPassword1!"), AccountRole.Student);
+        var stale = (await db.Users.FindByIdAsync(account.Id))!;
+        stale.EmailConfirmed = true;
+        Assert.True((await db.Users.UpdateAsync(stale)).Succeeded);
+        string persistedBefore;
+        using (var concurrent = db.CreateScope())
+        {
+            var users = concurrent.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+            var current = (await users.FindByIdAsync(account.Id))!;
+            current.PhoneNumber = "concurrent-change";
+            Assert.True((await users.UpdateAsync(current)).Succeeded);
+            persistedBefore = System.Text.Json.JsonSerializer.Serialize(current);
+        }
+
+        Assert.False(await new AccountRepository(db.Context, db.Users, db.SignIn, db.Protection).ChangePasswordAsync(gym.Id, account.Id,
+            "CorrectPassword1!", "NewPassword2!", default));
+
+        using var verification = db.CreateScope();
+        var persisted = await verification.ServiceProvider.GetRequiredService<StaticXDbContext>().Users.SingleAsync();
+        Assert.True(persistedBefore == System.Text.Json.JsonSerializer.Serialize(persisted), "Concurrency failure must preserve the winning update, password hash and security stamp.");
+        var verifier = verification.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+        Assert.True(await verifier.CheckPasswordAsync(persisted, "CorrectPassword1!"));
+        Assert.False(await verifier.CheckPasswordAsync(persisted, "NewPassword2!"));
+    }
+
+    [Fact]
+    public async Task ChangePassword_Repository_CancellationPropagatesWithoutMutation()
+    {
+        await using var db = await AccountDatabase.CreateAsync();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var exception = await Assert.ThrowsAsync<OperationCanceledException>(() => new AccountRepository(db.Context, db.Users, db.SignIn, db.Protection)
+            .ChangePasswordAsync(null, "id", "current", "replacement", cancellation.Token));
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        Assert.Equal(0, await db.Context.Users.CountAsync());
+    }
+
+    [Fact]
+    public async Task ChangePassword_Repository_SamePasswordFollowsIdentityPolicyAndRotatesStamp()
+    {
+        await using var db = await AccountDatabase.CreateAsync();
+        var gym = await db.Gyms.AddAsync(new CreateGymRequest("First"));
+        var account = await db.Accounts.CreateAsync(gym.Id, new CreateAccountRequest("same-password@example.invalid", "CorrectPassword1!"), AccountRole.Student);
+        var user = (await db.Users.FindByIdAsync(account.Id))!;
+        user.EmailConfirmed = true;
+        Assert.True((await db.Users.UpdateAsync(user)).Succeeded);
+        var stamp = user.SecurityStamp;
+        Assert.True(await new AccountRepository(db.Context, db.Users, db.SignIn, db.Protection).ChangePasswordAsync(gym.Id, account.Id,
+            "CorrectPassword1!", "CorrectPassword1!", default));
+        db.Context.ChangeTracker.Clear();
+        var persisted = await db.Context.Users.SingleAsync();
+        Assert.True(stamp != persisted.SecurityStamp, "Even an Identity-approved same-password change revokes old cookies.");
+        Assert.True(await db.Users.CheckPasswordAsync(persisted, "CorrectPassword1!"));
+    }
+
     [Fact]
     public async Task Create_SameEmailAcrossGyms_PersistsSeparateIdentityPasswordsAndUsernames()
     {
@@ -168,6 +256,9 @@ public sealed class TenantAccountTests
         public UserManager<GymAccount> Users { get; }
         public AccountService Accounts { get; }
         public GymService Gyms { get; }
+        public IDataProtectionProvider Protection { get; } = new EphemeralDataProtectionProvider();
+        public SignInManager<GymAccount> SignIn => scope.ServiceProvider.GetRequiredService<SignInManager<GymAccount>>();
+        public IServiceScope CreateScope() => provider.CreateScope();
 
         private AccountDatabase(SqliteConnection connection, ServiceProvider provider, IServiceScope scope)
         {
@@ -177,7 +268,8 @@ public sealed class TenantAccountTests
             Context = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
             Users = scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
             Accounts = new AccountService(new AccountRepository(Context, Users,
-                scope.ServiceProvider.GetRequiredService<SignInManager<GymAccount>>()), TestMapper.Instance);
+                scope.ServiceProvider.GetRequiredService<SignInManager<GymAccount>>(), Protection), TestMapper.Instance,
+                Protection, new ConfigurationBuilder().Build(), TimeProvider.System);
             Gyms = new GymService(new GymRepository(Context), TestMapper.Instance);
         }
 

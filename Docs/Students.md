@@ -1,6 +1,6 @@
 # Student fichas: search, pagination, and active state
 
-GymAdmin and Trainer can create, view, edit, deactivate, and reactivate student fichas in their authenticated session gym. A ficha is not an account: none of these operations changes login, credentials, roles, invitations, routines, or email delivery.
+GymAdmin and Trainer can create, view, edit, deactivate, and reactivate student fichas in their authenticated session gym. A ficha remains independent of an account and can exist without one. The explicitly approved exception is **access synchronization for an explicitly linked Student identity**: deactivation disables that login and rotates its security stamp; reactivation restores only access suspended by that ficha. Contact edits never change login email or infer/reassign a link. No operation changes routines, grants roles, confirms email, creates passwords, or automatically generates invitations.
 
 ## HTTP contract
 
@@ -61,8 +61,24 @@ See [Students.http](../src/Static_X.API/Students.http) for requests.
 
 ## Schema rollout
 
+### Explicit account linkage and access synchronization
+
+Deploy the separately reviewed **`20261111012132_AddTenantAccountInvitations` (UNAPPLIED by this implementation)** after the existing recovery migration. `Alumnos.AccountId` is optional, uniquely indexed when non-null and restrictively references Identity. There is no email-based backfill. Existing unlinked fichas retain their previous behavior, even when their contact email matches an account. Contact email remains bounded at 320; the separately chosen invitation/login recipient is bounded at 256. Response JSON remains unchanged and does not expose the link or Identity fields.
+
+`POST /api/accounts/invitations` selects an existing active ficha explicitly; see [tenant invitations](ActivationOperations.md#invite-a-trainer-or-an-explicitly-selected-student). Same-gym Student-role link validity is checked in DAL operations, not fabricated as a cross-table SQL CHECK or nullable-gym alternate key. Corrupt/wrong-role/wrong-gym links fail closed without modifying the other identity.
+
+The existing PATCH routes atomically change ficha state and the linked account. `IsEnabled` defaults true for historical accounts. A separate `StudentAccessSuspended` marker records whether the ficha actually disabled an enabled Student login, so reactivation cannot undo an independently disabled account. Deactivation rotates security and concurrency stamps; repeated deactivation does not restore them. Reactivation does not restore the old stamp, unlock the account, confirm email, create credentials or consume/replace an invitation. Old cookies remain invalid after reactivation; explicit login is required. Already authenticated in-flight requests are not cancelled.
+
+Inactive linked pending identities cannot activate or receive activation delivery. Their unchanged, unexpired invitation can become eligible again after reactivation; expiry still applies. Password recovery/reset/change cannot enable a disabled account. An old recovery link remains invalid after reactivation because the stamp changed.
+
+Invitation, activation and **linked** ficha-state writers acquire a transaction-owned no-op write to the gym row before changing mutable targets. This deliberately coarse mutex trades a gym's write throughput for a consistent lock order without nullable alternate keys or provider-specific advisory locks. Unlinked state writes preserve their historical save/refresh and post-save cancellation semantics: `AccountId` is an EF concurrency token, so a newly bound link invalidates a stale unlinked write. Invitation binding conditionally requires the ficha still be active and unlinked in the actual UPDATE. This pairing prevents adoption of a newly inactive ficha or an unsynchronized stale state write. The token needs no extra column. SQLite execution and offline model checks are not SQL Server production load/concurrency certification. The restrictive FK and unique link index independently protect reference integrity.
+
+Rollback is guarded: it refuses while any tenant invitation audit, explicit link, non-admin invitation, or disabled/suspended account exists. Preserve business accounts/history and obtain a separately authorized preservation/remediation plan before rollback; never delete accounts, links or audit rows, or silently re-enable accounts merely to bypass the guard.
+
+### Historical active-state migration
+
 `20261027023459_AddStudentActiveState` is the sixth migration. It adds `Alumnos.Activo bit NOT NULL DEFAULT 1`, making existing rows active without dropping/recreating the table. New entities and repository-created fichas also start active. Down removes only the new column (and loses state history); it does not delete fichas.
 
-The five historical Up/Down bodies remain unchanged. The SQL Server model and snapshot are checked offline; SQLite tests check actual persistence/defaults and concurrency behavior. State writes mark only Activo modified; repeated calls still issue a write so deletion after retrieval produces a concurrency failure rather than false success. No RowVersion is introduced.
+The five historical Up/Down bodies remain unchanged. The SQL Server model and snapshot are checked offline; SQLite tests check actual persistence/defaults and concurrency behavior. Unlinked ficha-state writes mark only Activo modified; linked writes additionally synchronize the account as described above. Repeated calls still issue a write so deletion after retrieval produces a concurrency failure rather than false success. No RowVersion is introduced.
 
 The active-state migration was generated in the preceding feature; the operator reports applying it, but that deployed state has not been independently verified. Search and pagination require **no new migration**. Deployment remains subject to the normal operator-reviewed process. Verification does not connect to SQL Server, inspect deployed migration status, or contact Resend.

@@ -79,6 +79,7 @@ public sealed class ActivationDtoTests
 
     private sealed class Repository : IActivationRepository
     {
+        public Task<Entity.Account?> InviteAsync(int gymId, string key, string email, Entity.AccountRole role, int? studentId, string tokenHash, Guid invitationId, string protectedToken, DateTimeOffset now, DateTimeOffset expiresAt, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Account? ActivatedAccount { get; set; } = new Account("activated-account", 41, "persisted@example.com", AccountRole.GymAdmin);
         public string? Key { get; private set; }
         public string? Name { get; private set; }

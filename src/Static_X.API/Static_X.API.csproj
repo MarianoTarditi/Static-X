@@ -3,7 +3,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>b7e78602-eb4f-43fd-8211-fed90edb185c</UserSecretsId>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="ActivationPage/index.html;ActivationPage/activation.js;ActivationPage/activation.css" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Static_X.BLL\Static_X.BLL.csproj" />
     <ProjectReference Include="..\Static_X.DAL\Static_X.DAL.csproj" />
@@ -13,6 +17,6 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Resend" Version="0.24.0" />
+    <PackageReference Include="Resend" Version="0.26.0" />
   </ItemGroup>
 </Project>

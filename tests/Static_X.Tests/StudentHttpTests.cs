@@ -779,6 +779,9 @@ public sealed class StudentHttpTests
                 .UseSetting("Activation:KeyRingPath", keys)
                 .ConfigureServices(services =>
                 {
+                    // Keep unrelated maintenance away from the shared in-memory connection during schema creation.
+                    foreach (var worker in services.Where(d => d.ImplementationType == typeof(Static_X.API.Integrations.PasswordRecoveryOutboxWorker)).ToArray())
+                        services.Remove(worker);
                     services.RemoveAll<DbContextOptions<StaticXDbContext>>();
                     services.RemoveAll<IDbContextOptionsConfiguration<StaticXDbContext>>();
                     services.AddDbContext<StaticXDbContext>(options => options.UseSqlite(connection));

@@ -22,6 +22,7 @@ public sealed class StudentRepository : IStudentRepository
     /// <summary>Agrega el alumno al contexto, guarda los cambios y devuelve la entidad persistida.</summary>
     public async Task<Alumno> AddAsync(Alumno student, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         student.Activo = true;
         await context.Alumnos.AddAsync(student, cancellationToken);
         try
@@ -105,17 +106,54 @@ public sealed class StudentRepository : IStudentRepository
         return new StudentPage(items, totalCount);
     }
 
-    /// <summary>Actualiza únicamente el estado y consulta la ficha persistida dentro del gimnasio solicitado.</summary>
+    /// <summary>Sincroniza atómicamente el estado de la ficha y el acceso de su cuenta Student explícitamente vinculada.</summary>
     public async Task<Alumno?> SetActiveAsync(int gimnasioId, int studentId, bool active, CancellationToken cancellationToken)
     {
         var student = await context.Alumnos.SingleOrDefaultAsync(
             s => s.GimnasioId == gimnasioId && s.Id == studentId, cancellationToken);
         if (student is null) return null;
+        // Preserve the historical unlinked save/refresh and post-save cancellation contract.
+        // AccountId is a concurrency token: an invitation that binds after this read makes this write fail closed.
+        if (student.AccountId is null)
+            return await SaveStateAsync(student, active, cancellationToken);
+
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        await TenantAccountLock.AcquireAsync(context, gimnasioId, cancellationToken);
+        await context.Entry(student).ReloadAsync(cancellationToken);
+        if (context.Entry(student).State == EntityState.Detached || student.GimnasioId != gimnasioId)
+            throw new DbUpdateConcurrencyException("The student is no longer available in the requested gym.");
+        if (student.AccountId is not null)
+        {
+            var account = await context.Users.SingleOrDefaultAsync(u => u.Id == student.AccountId &&
+                u.GymId == gimnasioId && u.Role == AccountRole.Student, cancellationToken);
+            if (account is null) throw new InvalidOperationException("The student account link is invalid.");
+            if (!active && account.IsEnabled)
+            {
+                account.IsEnabled = false;
+                account.StudentAccessSuspended = true;
+                account.SecurityStamp = Guid.NewGuid().ToString("N");
+                account.ConcurrencyStamp = Guid.NewGuid().ToString("N");
+            }
+            else if (active && account.StudentAccessSuspended)
+            {
+                account.IsEnabled = true;
+                account.StudentAccessSuspended = false;
+                account.ConcurrencyStamp = Guid.NewGuid().ToString("N");
+            }
+        }
+        var persisted = await SaveStateAsync(student, active, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return persisted;
+    }
+
+    /// <summary>Guarda únicamente el estado de la ficha y actualiza su lectura, comprobando el vínculo original frente a cambios concurrentes.</summary>
+    private async Task<Alumno> SaveStateAsync(Alumno student, bool active, CancellationToken cancellationToken)
+    {
         student.Activo = active;
         // Force an UPDATE even for an idempotent call so a concurrent deletion cannot produce false success.
         context.Entry(student).Property(s => s.Activo).IsModified = true;
         await context.SaveChangesAsync(cancellationToken);
-        return await FindAsync(gimnasioId, studentId, cancellationToken)
+        return await FindAsync(student.GimnasioId, student.Id, cancellationToken)
             ?? throw new DbUpdateConcurrencyException("The student is no longer available in the requested gym after the state update.");
     }
 }

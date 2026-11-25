@@ -1,0 +1,88 @@
+@baseUrl = https://localhost:7226
+@csrfToken = <fresh authenticated CSRF token>
+@accountId = <account ID from the authorized invitation list>
+@gymId = 2
+
+### GymAdmin invites a Trainer; send the validated session cookies
+POST {{baseUrl}}/api/accounts/invitations
+X-CSRF-TOKEN: {{csrfToken}}
+Content-Type: application/json
+
+{
+  "key": "trainer-invitation-001",
+  "email": "trainer@example.invalid",
+  "role": 2
+}
+
+### GymAdmin or Trainer invites the selected active Student ficha in their session gym
+POST {{baseUrl}}/api/accounts/invitations
+X-CSRF-TOKEN: {{csrfToken}}
+Content-Type: application/json
+
+{
+  "key": "student-invitation-001",
+  "email": "student-login@example.invalid",
+  "role": 3,
+  "studentId": 23
+}
+
+### Missing or foreign ficha returns the same 404 without account creation
+POST {{baseUrl}}/api/accounts/invitations
+X-CSRF-TOKEN: {{csrfToken}}
+Content-Type: application/json
+
+{
+  "key": "missing-student-001",
+  "email": "student-login@example.invalid",
+  "role": 3,
+  "studentId": 2147483647
+}
+
+### Bodyless existing lifecycle route also suspends an explicitly linked Student login
+PATCH {{baseUrl}}/api/students/23/deactivate
+X-CSRF-TOKEN: {{csrfToken}}
+
+### Restores only ficha-derived suspension; does not restore old sessions or activate pending identities
+PATCH {{baseUrl}}/api/students/23/reactivate
+X-CSRF-TOKEN: {{csrfToken}}
+
+### List persisted Student invitation states (GymAdmin or Trainer); no CSRF header required
+GET {{baseUrl}}/api/accounts/invitations?role=3&offset=0&pageSize=25
+
+### List Trainer invitation states (GymAdmin only)
+GET {{baseUrl}}/api/accounts/invitations?role=2&offset=0&pageSize=25
+
+### Replace a Student link after one hour from last queueing; an earlier attempt returns 409
+POST {{baseUrl}}/api/accounts/invitations/{{accountId}}/resend?role=3
+X-CSRF-TOKEN: {{csrfToken}}
+
+### Immediately cancel Student links without changing the account or ficha; repeats return 204
+POST {{baseUrl}}/api/accounts/invitations/{{accountId}}/cancel?role=3
+X-CSRF-TOKEN: {{csrfToken}}
+
+### Missing or foreign account returns generic 404
+POST {{baseUrl}}/api/accounts/invitations/unknown/resend?role=3
+X-CSRF-TOKEN: {{csrfToken}}
+
+### SuperAdmin session only: list GymAdmin invitation states in the selected gym
+GET {{baseUrl}}/api/gyms/{{gymId}}/administrators/invitations?offset=0&pageSize=25
+
+### SuperAdmin session only: existing resend route, now with the same one-hour cooldown
+POST {{baseUrl}}/api/gyms/{{gymId}}/administrators/{{accountId}}/invitation
+X-CSRF-TOKEN: {{csrfToken}}
+
+### SuperAdmin session only: cancel GymAdmin links without deleting the gym or account
+POST {{baseUrl}}/api/gyms/{{gymId}}/administrators/{{accountId}}/invitation/cancel
+X-CSRF-TOKEN: {{csrfToken}}
+
+### A deliberate new tenant invitation after cancellation requires a new key and the same target, after cooldown
+POST {{baseUrl}}/api/accounts/invitations
+X-CSRF-TOKEN: {{csrfToken}}
+Content-Type: application/json
+
+{
+  "key": "student-invitation-002",
+  "email": "student-login@example.invalid",
+  "role": 3,
+  "studentId": 23
+}

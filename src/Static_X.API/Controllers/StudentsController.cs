@@ -73,7 +73,7 @@ public sealed class StudentsController : ControllerBase
             : Ok(student);
     }
 
-    /// <summary>Deactivates a student ficha without deleting it or changing account access.</summary>
+    /// <summary>Deactivates a ficha and disables its explicitly linked Student login atomically.</summary>
     [HttpPatch("{id:int}/deactivate")]
     [ProducesResponseType<StudentResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]

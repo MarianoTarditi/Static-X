@@ -1,4 +1,8 @@
 @baseUrl = https://localhost:7226
+@currentPassword = <supply-locally-do-not-commit>
+@newPassword = <supply-locally-do-not-commit>
+@authenticatedCsrf = <fresh-authenticated-token>
+@csrfToken = <fresh-token-for-current-session>
 
 ### Fetch a CSRF request token; keep the antiforgery cookie in the same client session.
 GET {{baseUrl}}/api/account/csrf
@@ -31,3 +35,38 @@ GET {{baseUrl}}/api/account/me
 
 ### Before another login, fetch a fresh anonymous CSRF token; refresh again after login.
 GET {{baseUrl}}/api/account/csrf
+
+### Alternative to logout: change your own password while still authenticated.
+### Fetch authenticated CSRF first. No account, gym, or role selector belongs in this body.
+### Expected: empty 204/no-store, current cookie expired; ALL old sessions/copies rejected on next request.
+POST {{baseUrl}}/api/account/change-password
+Content-Type: application/json
+X-CSRF-TOKEN: {{authenticatedCsrf}}
+
+{
+  "currentPassword": "{{currentPassword}}",
+  "newPassword": "{{newPassword}}"
+}
+
+### After success: fresh anonymous CSRF, explicit login with the NEW password and original gym selector,
+### then fresh authenticated CSRF. Never log or commit real passwords or tokens.
+GET {{baseUrl}}/api/account/csrf
+### Anonymous recovery: fetch a fresh CSRF token using the same cookie jar first.
+POST {{baseUrl}}/api/account/forgot-password
+Content-Type: application/json
+X-CSRF-TOKEN: {{csrfToken}}
+
+{
+  "email": "member@example.invalid",
+  "gymId": 2
+}
+
+### Future frontend obtains the opaque token only from the emailed fragment, never from an API preview.
+POST {{baseUrl}}/api/account/reset-password
+Content-Type: application/json
+X-CSRF-TOKEN: {{csrfToken}}
+
+{
+  "token": "<protected-token-from-email-fragment>",
+  "newPassword": "<privately-chosen-password>"
+}

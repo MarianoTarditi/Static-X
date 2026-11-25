@@ -107,7 +107,7 @@ public sealed class StudentService : IStudentService
         return new StudentListResponse(mapper.Map<StudentResponse[]>(result.Items), request.Page, request.PageSize, result.TotalCount);
     }
 
-    /// <summary>Desactiva la ficha del alumno sin eliminarla ni modificar sus datos personales.</summary>
+    /// <summary>Desactiva la ficha y suspende el acceso de su cuenta Student explícitamente vinculada.</summary>
     public Task<StudentResponse?> DeactivateAsync(int gimnasioId, int studentId, CancellationToken cancellationToken = default) =>
         SetActiveAsync(gimnasioId, studentId, false, cancellationToken);
 

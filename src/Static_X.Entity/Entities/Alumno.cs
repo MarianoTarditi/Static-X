@@ -8,6 +8,8 @@ namespace Entity
     {
         public int Id { get; set; }
         public int GimnasioId { get; set; }
+        public string? AccountId { get; set; }
+        public long PaymentRevision { get; set; }
         public bool Activo { get; set; } = true;
         public string Nombre { get; set; } = string.Empty;
         public string Apellido { get; set; } = string.Empty;

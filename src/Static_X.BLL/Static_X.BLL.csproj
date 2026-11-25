@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="AutoMapper" Version="16.2.0" />
+    <PackageReference Include="AutoMapper" Version="16.3.0" />
     <ProjectReference Include="..\Static_X.DAL\Static_X.DAL.csproj" />
     <ProjectReference Include="..\Static_X.Entity\Static_X.Entity.csproj" />
     <!-- Existing activation services consume Data Protection and IConfiguration. -->

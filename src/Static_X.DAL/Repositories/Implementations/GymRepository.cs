@@ -40,7 +40,7 @@ public sealed class GymRepository : IGymRepository
         if (!await context.Gimnasios.AsNoTracking().AnyAsync(g => g.Id == gymId, cancellationToken))
             return null;
         var pending = context.Users.AsNoTracking().Where(u => u.GymId == gymId &&
-            u.Role == AccountRole.GymAdmin && !u.EmailConfirmed && u.PasswordHash == null &&
+            u.Role == AccountRole.GymAdmin && u.IsEnabled && !u.EmailConfirmed && u.PasswordHash == null &&
             context.ProvisioningRequests.Any(r => r.GymId == gymId && r.AccountId == u.Id));
         var count = await pending.CountAsync(cancellationToken);
         var items = await pending.OrderBy(u => u.Id).Skip(offset).Take(pageSize)

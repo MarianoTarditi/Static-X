@@ -34,8 +34,12 @@ public class ArchitectureTests
         (typeof(IAccountService), typeof(AccountService)),
         (typeof(IActivationService), typeof(ActivationService)),
         (typeof(IActivationDispatcher), typeof(ActivationDispatcher)),
+        (typeof(IPasswordRecoveryDispatcher), typeof(PasswordRecoveryDispatcher)),
         (typeof(IGymService), typeof(GymService)),
-        (typeof(IStudentService), typeof(StudentService))
+        (typeof(IStudentService), typeof(StudentService)),
+        (typeof(IDashboardService), typeof(DashboardService)),
+        (typeof(IPaymentService), typeof(PaymentService)),
+        (typeof(IRoutineService), typeof(RoutineService))
     ];
 
     [Fact]
@@ -78,7 +82,12 @@ public class ArchitectureTests
     {
         var contracts = typeof(AccountService).Assembly.GetExportedTypes().Where(type => type.IsInterface &&
             type.Namespace is "BLL.Services.Interfaces" or "BLL.Interfaces").ToArray();
-        Assert.Equal(6, contracts.Length);
+        Assert.Equal(11, contracts.Length);
+        Assert.Contains(typeof(BLL.Interfaces.IPasswordRecoveryEmailSender), contracts);
+        Assert.Contains(typeof(IAccountService), contracts);
+        Assert.Contains(typeof(IPasswordRecoveryDispatcher), contracts);
+        Assert.Contains(typeof(IRoutineService), contracts);
+        Assert.Contains(typeof(IDashboardService), contracts);
         foreach (var type in contracts.Concat(Services.Select(pair => pair.Implementation)))
         {
             foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
@@ -93,6 +102,8 @@ public class ArchitectureTests
     [Fact]
     public void BusinessServiceContracts_GroupFieldsInDtos_AndKeepTrustedContextSeparate()
     {
+        AssertSignature<IDashboardService>("GetAsync", typeof(Task<DashboardResponse>), typeof(int), typeof(AccountRole), typeof(CancellationToken));
+        AssertSignature<IDashboardRepository>("GetStudentCountsAsync", typeof(Task<global::DAL.Repositories.Models.DashboardStudentCounts>), typeof(int), typeof(CancellationToken));
         AssertSignature<IStudentService>("AddAsync", typeof(Task<StudentResponse>), typeof(int), typeof(CreateStudentRequest), typeof(CancellationToken));
         AssertSignature<IStudentService>("UpdateAsync", typeof(Task<StudentResponse>), typeof(int), typeof(int), typeof(UpdateStudentRequest), typeof(CancellationToken));
         AssertSignature<IStudentService>("FindAsync", typeof(Task<StudentResponse>), typeof(int), typeof(int), typeof(CancellationToken));
@@ -103,6 +114,16 @@ public class ArchitectureTests
         AssertSignature<IAccountService>("SignInAsync", typeof(Task<AccountResponse>), typeof(int?), typeof(LoginRequest), typeof(CancellationToken));
         AssertSignature<IAccountService>("FindByEmailAsync", typeof(Task<AccountResponse>), typeof(int), typeof(string), typeof(CancellationToken));
         AssertSignature<IAccountService>("FindByIdAsync", typeof(Task<AccountResponse>), typeof(int?), typeof(string), typeof(CancellationToken));
+        AssertSignature<IAccountService>("ChangePasswordAsync", typeof(Task<bool>), typeof(int?), typeof(string), typeof(ChangePasswordRequest), typeof(CancellationToken));
+        AssertSignature<IAccountService>("ListTrainersAsync", typeof(Task<TrainerListResponse>), typeof(int), typeof(AccountRole), typeof(TrainerListRequest), typeof(CancellationToken));
+        AssertSignature<IAccountService>("SetTrainerEnabledAsync", typeof(Task<bool>), typeof(int), typeof(AccountRole), typeof(string), typeof(bool), typeof(CancellationToken));
+        AssertSignature<IAccountRepository>("ListTrainersAsync", typeof(Task<global::DAL.Repositories.Models.TrainerAccountPage>), typeof(int), typeof(int), typeof(int), typeof(CancellationToken));
+        AssertSignature<IAccountRepository>("SetTrainerEnabledAsync", typeof(Task<bool>), typeof(int), typeof(string), typeof(bool), typeof(CancellationToken));
+        Assert.Equal(new[] { "Page", "PageSize" }, typeof(TrainerListRequest).GetProperties().Select(property => property.Name).Order());
+        Assert.Same(typeof(Account).Assembly, typeof(TrainerAccountProjection).Assembly);
+        Assert.Equal(typeof(IReadOnlyList<TrainerAccountProjection>), typeof(global::DAL.Repositories.Models.TrainerAccountPage).GetProperty("Items")!.PropertyType);
+        AssertSignature<IAccountRepository>("ChangePasswordAsync", typeof(Task<bool>), typeof(int?), typeof(string), typeof(string), typeof(string), typeof(CancellationToken));
+        Assert.Equal(new[] { "CurrentPassword", "NewPassword" }, typeof(ChangePasswordRequest).GetProperties().Select(property => property.Name).Order());
         AssertSignature<IGymService>("AddAsync", typeof(Task<GymResponse>), typeof(CreateGymRequest), typeof(CancellationToken));
         AssertSignature<IGymService>("ListAsync", typeof(Task<GymListResponse>), typeof(GymListRequest), typeof(CancellationToken));
         AssertSignature<IGymService>("ListPendingAdministratorsAsync", typeof(Task<PendingAdministratorListResponse>), typeof(int), typeof(GymListRequest), typeof(CancellationToken));
@@ -111,6 +132,9 @@ public class ArchitectureTests
         AssertSignature<IActivationService>("ActivateAsync", typeof(Task<ActivationResponse>), typeof(ActivateAccountRequest), typeof(CancellationToken));
         AssertSignature<IActivationService>("ReissueAsync", typeof(Task<bool>), typeof(int), typeof(string), typeof(CancellationToken));
         AssertSignature<IActivationDispatcher>("DispatchOneAsync", typeof(Task<bool>), typeof(CancellationToken));
+        AssertSignature<IAccountService>("ForgotAsync", typeof(Task<ForgotPasswordResponse>), typeof(ForgotPasswordRequest), typeof(CancellationToken));
+        AssertSignature<IAccountService>("ResetAsync", typeof(Task<string>), typeof(ResetPasswordRequest), typeof(CancellationToken));
+        AssertSignature<IPasswordRecoveryDispatcher>("DispatchOneAsync", typeof(Task<bool>), typeof(CancellationToken));
         Assert.Equal(new[] { "Email", "Password" }, typeof(CreateAccountRequest).GetProperties().Select(property => property.Name).Order());
         Assert.Equal(new[] { "Apellido", "Email", "Nombre" }, typeof(CreateStudentRequest).GetProperties().Select(property => property.Name).Order());
         Assert.Equal(new[] { "Apellido", "Email", "Nombre" }, typeof(UpdateStudentRequest).GetProperties().Select(property => property.Name).Order());
@@ -207,6 +231,40 @@ public class ArchitectureTests
     }
 
     [Fact]
+    public void PasswordRecovery_UsesCanonicalAccountBindingsAndPreservesActionMetadata()
+    {
+        var api = typeof(Program).Assembly;
+        var business = typeof(AccountService).Assembly;
+        var data = typeof(AccountRepository).Assembly;
+        Assert.Null(api.GetType("Static_X.API.Controllers.PasswordRecoveryController"));
+        Assert.Null(business.GetType("BLL.PasswordRecoveryService"));
+        Assert.Null(business.GetType("BLL.Services.Interfaces.IPasswordRecoveryService"));
+        Assert.Null(data.GetType("DAL.Repositories.Implementation.PasswordRecoveryRepository"));
+        Assert.Null(data.GetType("DAL.Repositories.Interfaces.IPasswordRecoveryRepository"));
+
+        var controller = typeof(Static_X.API.Controllers.AuthenticationController);
+        Assert.Equal("api/account", controller.GetCustomAttribute<Microsoft.AspNetCore.Mvc.RouteAttribute>()!.Template);
+        Assert.Single(controller.GetConstructors().Single().GetParameters(), parameter => parameter.ParameterType == typeof(IAccountService));
+        foreach (var (name, route, request) in new[]
+        {
+            ("ForgotPassword", "forgot-password", typeof(ForgotPasswordRequest)),
+            ("ResetPassword", "reset-password", typeof(ResetPasswordRequest))
+        })
+        {
+            var action = controller.GetMethod(name)!;
+            Assert.Equal(route, action.GetCustomAttribute<Microsoft.AspNetCore.Mvc.HttpPostAttribute>()!.Template);
+            Assert.NotNull(action.GetCustomAttribute<Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute>());
+            Assert.Equal(new[] { request, typeof(CancellationToken) }, action.GetParameters().Select(parameter => parameter.ParameterType));
+        }
+        Assert.Equal("password-recovery", controller.GetMethod("ForgotPassword")!
+            .GetCustomAttribute<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>()!.PolicyName);
+        Assert.Null(controller.GetMethod("ResetPassword")!
+            .GetCustomAttribute<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>());
+        Assert.Single(typeof(PasswordRecoveryDispatcher).GetConstructors().Single().GetParameters(),
+            parameter => parameter.ParameterType == typeof(IAccountRepository));
+    }
+
+    [Fact]
     public void ApplicationDI_ResolvesEachServiceInterfaceOncePerScope()
     {
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder => builder
@@ -220,10 +278,15 @@ public class ArchitectureTests
         {
             var service = first.ServiceProvider.GetRequiredService(contract);
             Assert.IsType(implementation, service);
+            Assert.Same(service, Assert.Single(first.ServiceProvider.GetServices(contract)));
             Assert.Same(service, first.ServiceProvider.GetRequiredService(contract));
             Assert.NotSame(service, second.ServiceProvider.GetRequiredService(contract));
             Assert.Null(first.ServiceProvider.GetService(implementation));
         }
+        var repository = Assert.Single(first.ServiceProvider.GetServices<IAccountRepository>());
+        Assert.IsType<AccountRepository>(repository);
+        Assert.Same(repository, first.ServiceProvider.GetRequiredService<IAccountRepository>());
+        Assert.NotSame(repository, second.ServiceProvider.GetRequiredService<IAccountRepository>());
     }
 
     [Fact]
@@ -243,7 +306,8 @@ public class ArchitectureTests
         Assert.Same(configuration, second.ServiceProvider.GetRequiredService<IMapper>().ConfigurationProvider);
         configuration.AssertConfigurationIsValid();
         Assert.Equal("", factory.Services.GetRequiredService<IOptions<MapperConfigurationExpression>>().Value.LicenseKey);
-        Assert.Equal(new[] { "AccountProfile", "AccountProfile", "GymProfile", "StudentProfile" },
+        Assert.Equal(new[] { "AccountProfile", "AccountProfile", "AccountProfile", "DashboardProfile", "GymProfile", "PaymentProfile", "PaymentProfile",
+                "RoutineProfile", "RoutineProfile", "RoutineProfile", "StudentProfile" },
             configuration.Internal().GetAllTypeMaps().Select(map => map.Profile.Name.Split('.').Last()).Order());
         var result = mapper.Map<StudentResponse>(new Alumno { Id = 73, Nombre = "DI name", Apellido = "DI surname", Email = "DI@EXAMPLE.COM" });
         Assert.Equal((73, "DI name", "DI surname", "DI@EXAMPLE.COM"),
@@ -258,7 +322,7 @@ public class ArchitectureTests
         foreach (var service in new[] { typeof(ActivationService), typeof(ActivationDispatcher) })
             Assert.DoesNotContain(service.GetConstructors().SelectMany(constructor => constructor.GetParameters()),
                 parameter => parameter.ParameterType == typeof(IMapper));
-        foreach (var service in new[] { typeof(StudentService), typeof(AccountService), typeof(GymService) })
+        foreach (var service in new[] { typeof(StudentService), typeof(AccountService), typeof(GymService), typeof(DashboardService) })
             Assert.Single(service.GetConstructors().Single().GetParameters(), parameter => parameter.ParameterType == typeof(IMapper));
     }
 
@@ -286,13 +350,15 @@ public class ArchitectureTests
         AssertSignature<IGymRepository>("ListPendingAdministratorsAsync", typeof(Task<global::DAL.Repositories.Models.PendingAdministratorPage>), typeof(int), typeof(int), typeof(int), typeof(CancellationToken));
         Assert.Same(typeof(StaticXDbContext).Assembly, typeof(global::DAL.Repositories.Models.GymPage).Assembly);
         Assert.Same(typeof(StaticXDbContext).Assembly, typeof(global::DAL.Repositories.Models.PendingAdministratorPage).Assembly);
+        Assert.Same(typeof(StaticXDbContext).Assembly, typeof(global::DAL.Repositories.Models.DashboardStudentCounts).Assembly);
         Assert.Equal(typeof(IReadOnlyList<Gimnasio>), typeof(global::DAL.Repositories.Models.GymPage).GetProperty("Items")!.PropertyType);
         Assert.Equal(typeof(IReadOnlyList<Account>), typeof(global::DAL.Repositories.Models.PendingAdministratorPage).GetProperty("Items")!.PropertyType);
         var ports = new[] { typeof(IAccountRepository), typeof(IGymRepository),
-            typeof(IStudentRepository), typeof(IActivationRepository),
-            typeof(IActivationDeliveryRepository) };
+            typeof(IStudentRepository), typeof(IDashboardRepository), typeof(IActivationRepository),
+            typeof(IActivationDeliveryRepository), typeof(IPaymentRepository), typeof(IRoutineRepository) };
         Assert.All(ports, port => Assert.Equal("DAL.Repositories.Interfaces", port.Namespace));
         Assert.Equal("BLL.Interfaces", typeof(IActivationEmailSender).Namespace);
+        Assert.Equal("BLL.Interfaces", typeof(BLL.Interfaces.IPasswordRecoveryEmailSender).Namespace);
 
         var assembly = typeof(AccountService).Assembly;
         var businessTypes = assembly.GetTypes().Where(type => type.Namespace == "BLL" ||
@@ -318,8 +384,8 @@ public class ArchitectureTests
             type => type.GetConstructors().SelectMany(ctor => ctor.GetParameters())
                 .Any(parameter => parameter.ParameterType.Namespace?.StartsWith("BLL", StringComparison.Ordinal) == true));
         Assert.Equal("DAL.Repositories.Interfaces", typeof(ActivationDelivery).Namespace);
-        var repositories = new[] { typeof(AccountRepository), typeof(GymRepository), typeof(StudentRepository),
-            typeof(ActivationRepository), typeof(ActivationDeliveryRepository) };
+        var repositories = new[] { typeof(AccountRepository), typeof(GymRepository), typeof(StudentRepository), typeof(DashboardRepository),
+            typeof(ActivationRepository), typeof(ActivationDeliveryRepository), typeof(RoutineRepository) };
         Assert.All(repositories, repository => Assert.Equal("DAL.Repositories.Implementation", repository.Namespace));
         Assert.All(repositories.Concat(ports), type => Assert.Same(dataAssembly, type.Assembly));
         Assert.All(Services, pair =>
@@ -328,6 +394,9 @@ public class ArchitectureTests
             Assert.Same(assembly, pair.Implementation.Assembly);
         });
         Assert.Same(assembly, typeof(IActivationEmailSender).Assembly);
+        Assert.Same(assembly, typeof(BLL.Interfaces.IPasswordRecoveryEmailSender).Assembly);
+        Assert.Contains(typeof(BLL.Interfaces.IPasswordRecoveryEmailSender), typeof(Static_X.API.Integrations.ResendPasswordRecoveryEmailSender).GetInterfaces());
+        Assert.Same(typeof(Program).Assembly, typeof(Static_X.API.Integrations.ResendPasswordRecoveryEmailSender).Assembly);
         Assert.Same(typeof(Program).Assembly, adapter.Assembly);
     }
 
@@ -411,7 +480,10 @@ public class ArchitectureTests
             "20261018181500_InicialAlumno", "20261019234555_AddGymStudentTenancy",
             "20261020000233_AddGymAccounts", "20261020002609_AddActivationProvisioning",
             "20261020003316_AddActivationDeliveryRecovery", "20261027023459_AddStudentActiveState",
-            "20261028230341_AddGlobalSuperAdmin"
+            "20261028230341_AddGlobalSuperAdmin", "20261109221729_AddPasswordRecoveryOutbox",
+            "20261111012132_AddTenantAccountInvitations", "20261116000000_AddPayments",
+            "20261119013122_AddStudentRoutines", "20261123000000_AddRoutineMetadata",
+            "20261123010000_AddExerciseDuration"
         }, migrations.Migrations.Keys);
         Assert.False(context.Database.HasPendingModelChanges());
         var script = context.GetService<IMigrator>().GenerateScript();

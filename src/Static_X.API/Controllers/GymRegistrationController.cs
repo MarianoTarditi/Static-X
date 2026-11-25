@@ -25,6 +25,50 @@ public sealed class GymRegistrationController : ControllerBase
         this.gyms = gyms;
     }
 
+    [HttpGet("{gymId:int:min(1)}/administrators/invitations")]
+    [AdministrativeQueryResponse]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    [EndpointSummary("List latest pending, expired and cancelled gym administrator invitations.")]
+    [ProducesResponseType<InvitationListResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> ListAdministratorInvitations(int gymId, [FromQuery] InvitationListRequest request, CancellationToken cancellationToken)
+    {
+        return await InvitationActionAsync(async () => Ok(await activation.ListInvitationsAsync(gymId, Entity.AccountRole.SuperAdmin,
+            Entity.AccountRole.GymAdmin, request, cancellationToken)), cancellationToken);
+    }
+
+    [HttpPost("{gymId:int:min(1)}/administrators/{accountId}/invitation/cancel")]
+    [AdministrativeQueryResponse]
+    [EndpointSummary("Cancel pending gym administrator links without changing the account.")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> CancelAdministratorInvitation(int gymId, string accountId, CancellationToken cancellationToken)
+    {
+        return await InvitationActionAsync(async () => await activation.CancelInvitationAsync(gymId, Entity.AccountRole.SuperAdmin,
+            Entity.AccountRole.GymAdmin, accountId, cancellationToken) ? NoContent() :
+                NotFound(new ProblemDetails { Status = 404, Title = "Pending administrator not found." }), cancellationToken);
+    }
+
+    private async Task<IActionResult> InvitationActionAsync(Func<Task<IActionResult>> action, CancellationToken cancellationToken)
+    {
+        Response.Headers.CacheControl = "no-store";
+        try { return await action(); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
+        catch (ArgumentException) { return Problem(statusCode: 400, title: "Invalid invitation request."); }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogError("Administrator invitation operation failed.");
+            return Problem(statusCode: 500, title: "Invitation operation failed.");
+        }
+    }
+
     [HttpGet]
     [AdministrativeQueryResponse]
     [EndpointSummary("List all gyms for global administration.")]
@@ -91,9 +135,12 @@ public sealed class GymRegistrationController : ControllerBase
     }
 
     [HttpPost("{gymId:int:min(1)}/administrators/{accountId}/invitation")]
+    [AdministrativeQueryResponse]
+    [EndpointSummary("Resend a pending administrator invitation after one hour from last queueing.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> ReissueAdministratorInvitation(int gymId, string accountId, CancellationToken cancellationToken)
     {
@@ -105,6 +152,8 @@ public sealed class GymRegistrationController : ControllerBase
                 : NotFound(new ProblemDetails { Status = 404, Title = "Pending administrator not found." });
         }
         catch (ArgumentException) { return BadRequest(new ProblemDetails { Status = 400, Title = "Invalid invitation request." }); }
+        catch (BLL.Exceptions.InvitationCooldownException)
+        { return Conflict(new ProblemDetails { Status = 409, Title = "Invitation resend is available one hour after last queueing." }); }
         catch (InvalidOperationException)
         { return StatusCode(503, new ProblemDetails { Status = 503, Title = "Invitation delivery is unavailable." }); }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)

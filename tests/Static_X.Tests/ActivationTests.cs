@@ -276,12 +276,15 @@ public sealed class ActivationTests
     [Fact]
     public async Task Reissue_RevokesPreviousTokenAndSupersedesPendingDelivery()
     {
-        await using var fixture = await Fixture.CreateAsync();
+        var clock = new MutableClock { Now = DateTimeOffset.UtcNow };
+        await using var fixture = await Fixture.CreateAsync(clock: clock);
         var gymId = await fixture.Service.ProvisionAsync(new ProvisionGymRequest("request-a", "North", "admin@example.com"));
         var oldToken = await fixture.GetTokenAsync();
         var accountId = (await fixture.Context.Users.SingleAsync()).Id;
         Assert.False(await fixture.Service.ReissueAsync(gymId + 1, accountId));
+        clock.Now = clock.Now.AddHours(1);
         Assert.True(await fixture.Service.ReissueAsync(gymId, accountId));
+        fixture.Context.ChangeTracker.Clear();
         Assert.Equal(gymId, await fixture.Service.ProvisionAsync(new ProvisionGymRequest("request-a", "North", "admin@example.com")));
         Assert.Equal(2, await fixture.Context.ActivationInvitations.CountAsync());
         var old = await fixture.Context.ActivationInvitations.SingleAsync(i => i.RevokedAt != null);
@@ -299,12 +302,14 @@ public sealed class ActivationTests
     [Fact]
     public async Task Reissue_ExpiredInvitation_RecoversWithoutChangingProvisioningKey()
     {
-        await using var fixture = await Fixture.CreateAsync();
+        var clock = new MutableClock { Now = DateTimeOffset.UtcNow };
+        await using var fixture = await Fixture.CreateAsync(clock: clock);
         var gymId = await fixture.Service.ProvisionAsync(new ProvisionGymRequest("request-a", "North", "admin@example.com"));
         var previous = await fixture.Context.ActivationInvitations.SingleAsync();
         var accountId = previous.AccountId;
         previous.ExpiresAt = DateTime.UtcNow.AddMinutes(-1);
         await fixture.Context.SaveChangesAsync();
+        clock.Now = clock.Now.AddHours(25);
         Assert.True(await fixture.Service.ReissueAsync(gymId, accountId));
         Assert.Equal(gymId, await fixture.Service.ProvisionAsync(new ProvisionGymRequest("request-a", "North", "admin@example.com")));
         Assert.Equal(2, await fixture.Context.ActivationInvitations.CountAsync());
@@ -314,21 +319,23 @@ public sealed class ActivationTests
     [Fact]
     public async Task Dispatch_FailedCompletionAfterReissue_DoesNotRestoreRevokedSecret()
     {
-        await using var fixture = await Fixture.CreateAsync();
+        var clock = new MutableClock { Now = DateTimeOffset.UtcNow };
+        await using var fixture = await Fixture.CreateAsync(clock: clock);
         var gymId = await fixture.Service.ProvisionAsync(new ProvisionGymRequest("request-a", "North", "admin@example.com"));
         var accountId = (await fixture.Context.Users.AsNoTracking().SingleAsync()).Id;
         using var workerScope = fixture.CreateScope();
         var worker = workerScope.ServiceProvider.GetRequiredService<IActivationDeliveryRepository>();
-        var leased = await worker.LeaseDueAsync(DateTimeOffset.UtcNow, default);
+        var leased = await worker.LeaseDueAsync(clock.Now, default);
         Assert.NotNull(leased);
 
+        clock.Now = clock.Now.AddHours(1);
         Assert.True(await fixture.Service.ReissueAsync(gymId, accountId));
         var oldJob = await fixture.Context.ActivationOutbox.AsNoTracking()
             .SingleAsync(o => o.Id == leased!.JobId);
         Assert.Equal(string.Empty, oldJob.ProtectedToken);
         Assert.Null(oldJob.NextAttemptAt);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = clock.Now;
         await worker.CompleteAsync(leased!, now, false, default);
         oldJob = await fixture.Context.ActivationOutbox.AsNoTracking().SingleAsync(o => o.Id == leased!.JobId);
         Assert.Equal(string.Empty, oldJob.ProtectedToken);

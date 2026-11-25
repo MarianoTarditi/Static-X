@@ -14,21 +14,25 @@ The suite includes HTTP/login/CSRF, gym isolation, global SuperAdmin authorizati
 
 ## Source ownership
 
+The approved manual payment extension additionally owns Entity `Payment`/`GymPassPrice`, payment enums and `Alumno.PaymentRevision`; DAL `IPaymentRepository`/`PaymentRepository`, entity-based payment snapshots/pages, payment model configuration and unapplied `20261116000000_AddPayments`; BLL `DTOs/Payments`, `IPaymentService`/`PaymentService` and `PaymentProfile`; API `PaymentsController`/`StudentPaymentsController`, action-only coverage metadata and `PaymentAccessMiddleware`. These extend the inventories below, not the reference graph. See [Payments](Payments.md) for calendar, tariff, ledger, live access and rollout contracts. The new snapshot delegates to frozen payment migration metadata rather than live model configuration; all earlier migration bodies remain unchanged.
+
 ```text
 Static-X.sln
 src/
   Static_X.Entity/
     Static_X.Entity.csproj
     Entities/ Account.cs, Alumno.cs, Gimnasio.cs, GymAccount.cs,
-              ActivationInvitation.cs, ActivationDelivery.cs, ProvisioningRequest.cs
+              ActivationInvitation.cs, ActivationDelivery.cs, ProvisioningRequest.cs, TenantInvitationRequest.cs, TrainerAccountProjection.cs
     Enums/ AccountRole.cs
   Static_X.DAL/
     Static_X.DAL.csproj
     Persistence/
       StaticXDbContext.cs
       Configurations/ .gitkeep
-      Migrations/ preserved history plus AddStudentActiveState and AddGlobalSuperAdmin, designers, StaticXDbContextModelSnapshot.cs
-      Models/ ActivationOutbox.cs
+      Migrations/ preserved history plus AddStudentActiveState, AddGlobalSuperAdmin, AddPasswordRecoveryOutbox and AddTenantAccountInvitations, designers, StaticXDbContextModelSnapshot.cs
+      Models/ ActivationOutbox.cs, PasswordRecoveryOutbox.cs
+      PasswordResetTokenProvider.cs
+      TenantAccountLock.cs
     Repositories/
       Interfaces/ IAccountRepository.cs, IActivationRepository.cs,
                   IActivationDeliveryRepository.cs, IGymRepository.cs, IStudentRepository.cs
@@ -36,13 +40,17 @@ src/
   Static_X.BLL/
     Static_X.BLL.csproj
     Interfaces/ IAccountService.cs, IActivationService.cs, IActivationDispatcher.cs,
-                IActivationEmailSender.cs, IGymService.cs, IStudentService.cs
-     Services/ AccountService.cs, ActivationService.cs, ActivationDispatcher.cs,
+                IActivationEmailSender.cs, IPasswordRecoveryDispatcher.cs,
+                IPasswordRecoveryEmailSender.cs, IGymService.cs, IStudentService.cs
+     Services/ AccountService.cs, ActivationService.cs, ActivationDispatcher.cs, PasswordRecoveryDispatcher.cs,
                 GymService.cs, StudentService.cs
      Mappings/ AccountProfile.cs, StudentProfile.cs, GymProfile.cs
     DTOs/
-      Accounts/ LoginRequest.cs, CreateAccountRequest.cs, AccountResponse.cs, CsrfResponse.cs
-       Activations/ ActivateAccountRequest.cs, ActivationResponse.cs, ProvisionGymRequest.cs
+       Accounts/ LoginRequest.cs, CreateAccountRequest.cs, ChangePasswordRequest.cs, AccountResponse.cs, CsrfResponse.cs,
+                  ForgotPasswordRequest.cs, ForgotPasswordResponse.cs, ResetPasswordRequest.cs,
+                  TrainerListRequest.cs, TrainerListResponse.cs, TrainerResponse.cs
+       Activations/ ActivateAccountRequest.cs, ActivationResponse.cs, ProvisionGymRequest.cs,
+                    InviteAccountRequest.cs, AccountInvitationResponse.cs
        Gyms/ CreateGymRequest.cs, GymResponse.cs, GymListRequest.cs, GymListResponse.cs,
              PendingAdministratorResponse.cs, PendingAdministratorListResponse.cs
        Students/ CreateStudentRequest.cs, UpdateStudentRequest.cs, StudentResponse.cs,
@@ -50,12 +58,13 @@ src/
   Static_X.API/
     Static_X.API.csproj
     Auth/ GymClaimsPrincipalFactory.cs
-    Controllers/ AuthenticationController.cs, ActivationController.cs, GymRegistrationController.cs, StudentsController.cs
-    Integrations/ ActivationOutboxWorker.cs
-    Integrations/Email/ ResendActivationEmailSender.cs
+    Controllers/ AuthenticationController.cs, ActivationController.cs, AccountInvitationsController.cs,
+                 GymRegistrationController.cs, StudentsController.cs, TrainersController.cs
+    Integrations/ ActivationOutboxWorker.cs, PasswordRecoveryOutboxWorker.cs
+    Integrations/Email/ ResendActivationEmailSender.cs, ResendPasswordRecoveryEmailSender.cs
     Program.cs, appsettings.json, appsettings.Development.json
     Properties/ launchSettings.json
-    Account.http, Static-X.http
+    Account.http, Static-X.http, Invitations.http
 tests/
   Static_X.Tests/
     Static_X.Tests.csproj
@@ -104,13 +113,17 @@ Only SuperAdmin may call CSRF-protected `POST /api/gyms/provision` and `POST /ap
 
 The API-hosted worker creates and disposes an async DI scope per attempt, propagates cancellation, and delays after processed/idle/error outcomes (1/10/30 seconds). BLL keeps mandatory Resend, durable key-ring and HTTPS destination guards, with no bypass or pickup fallback. Pending outbox entries, leases/retries/provider idempotency, protected tokens, Data Protection names and purposes are retained. Starting an approved host can dispatch prior pending mail; see [activation operations](ActivationOperations.md) before deployment.
 
+### Own-password change contract extension
+
+The authorized own-password action remains in `AuthenticationController` → `IAccountService`/`AccountService` → `IAccountRepository`/`AccountRepository`. BLL owns `ChangePasswordRequest`, independent nonempty-input validation, and a scalar Boolean result; trusted account/gym identifiers remain separate and DAL receives scalar passwords, not BLL DTOs. Identity performs its concurrency-checked hash/stamp update without a second stamp write. Application-cookie validation explicitly checks the persisted stamp on every request (including equal issuance timestamps), retaining the existing periodic validator and persisted scope/role checks. This adds a user lookup per authenticated request; it requires no schema, migration, new service, or mapping profile. See the [password-change workflow and revocation limits](ActivationOperations.md#change-your-own-password-and-invalidate-all-sessions).
+
 ### Administrative query contract extension
 
 `GymRegistrationController` exposes SuperAdmin-only `GET /api/gyms` and `GET /api/gyms/{gymId}/administrators/pending`. Both use the validated cookie and return no-store, bounded pages without requiring CSRF on safe GET requests. The existing POST routes remain CSRF-protected. Invalid pagination/gym selectors return safe 400, a positive missing gym returns 404, and unexpected query failures return generic 500; cancellation propagates. No tenant or student access is added.
 
 The existing `IGymService`/`GymService` own independent pagination validation, response mapping and page metadata. Their `GymListRequest` contains only page bounds; the selected administrative gym ID remains separate. DAL `IGymRepository`/`GymRepository` execute no-tracking, async database counts and ordered bounded item queries, returning materialized `Repositories/Models/GymPage` (Entity `Gimnasio`) or `PendingAdministratorPage` (pure Entity `Account`), never BLL DTOs or full Identity entities. A missing gym returns null internally; an existing empty gym returns an empty page. Count/items are separate reads without a snapshot guarantee.
 
-All gyms are ordered by ID. Pending administrators are ordered by account ID and use the exact reissue predicate: matching gym, GymAdmin, unconfirmed email, exactly-null password hash, and a matching gym/account provisioning request using `EXISTS`, without invitation or delivery filters. Existing schema uniqueness permits at most one provisioning request per gym; `EXISTS` also avoids duplicate accounts if that invariant changes later. `GymProfile` maps gym items; `AccountProfile` additionally maps `Account` to `PendingAdministratorResponse` with only `accountId` and `email` through explicit constructor parameters. BLL creates both page envelopes directly. No generic pagination framework, new layer/profile, migration, model/configuration change, write operation, invitation generation, or email delivery is introduced. See [operational query examples and limits](ActivationOperations.md#select-a-gym-and-pending-administrator).
+All gyms are ordered by ID. Pending administrators are ordered by account ID and use the exact reissue predicate: matching gym, GymAdmin, enabled account, unconfirmed email, exactly-null password hash, and a matching gym/account provisioning request using `EXISTS`, without invitation or delivery filters. Enablement is the separately approved tenant-lifecycle addition below; historical accounts default enabled. Existing schema uniqueness permits at most one provisioning request per gym; `EXISTS` also avoids duplicate accounts if that invariant changes later. `GymProfile` maps gym items; `AccountProfile` additionally maps `Account` to `PendingAdministratorResponse` with only `accountId` and `email` through explicit constructor parameters. BLL creates both page envelopes directly. The original query extension introduced no generic pagination framework, new layer/profile, migration, model/configuration change, write operation, invitation generation, or email delivery. See [operational query examples and limits](ActivationOperations.md#select-a-gym-and-pending-administrator).
 
 ### Student listing contract extension
 
@@ -118,7 +131,23 @@ The authorized [student search and pagination](Students.md#list-response-and-que
 
 ## AutoMapper response mapping
 
-BLL owns `Mappings/StudentProfile`, `AccountProfile`, and `GymProfile`. They map domain entities to public item responses using explicit constructor parameters. `AccountProfile` maps pure `Account` to `AccountResponse` and the separately approved minimal `PendingAdministratorResponse`, never the Identity adapter `GymAccount`. No reverse maps or request-to-entity maps are registered. Business validation, trimming, email normalization, authorization, and trusted gym/role selection stay in services. Student writes still construct entities explicitly with trusted gym context.
+### Approved tenant invitations and linked Student access
+
+The bounded tenant lifecycle extension retains the existing layers and recovery ownership. API owns `AccountInvitationsController` at `POST /api/accounts/invitations`, CSRF/role authorization, generic status mapping and no-store response handling. BLL adds explicit `InviteAccountRequest`/`AccountInvitationResponse` in `DTOs/Activations` and independent actor/grant validation in the existing `IActivationService`/`ActivationService`. Trusted gym and actor role are separate from the request. No mapper/profile or new business service is introduced. DAL extends the existing activation repository with entity-based results and stores immutable tenant request snapshots separately from gym provisioning requests.
+
+GymAdmin can invite Trainer or Student; Trainer can invite Student only. Student and global SuperAdmin cannot use this tenant route. Student invitations require a selected active same-gym ficha and create pending Identity, explicit unique link, invitation and protected outbox atomically; Trainer invitations have no ficha. Idempotency uses `(GymId, Key)` and normalized email/role/student snapshots, with provenance-constrained pending reissue, never account adoption or role elevation. Activation/delivery check the persisted expected role and Student linkage. Historical administrator invitations default to GymAdmin and retain their separate SuperAdmin-controlled workflow.
+
+Entity adds `TenantInvitationRequest`, optional `Alumno.AccountId`, invitation `ExpectedRole`, and Identity enablement/derived suspension flags. `Account` stays separate from `GymAccount`; auth DTOs do not expose these controls. DAL owns the unique restrictive FK, checks, guarded migration `20261111012132_AddTenantAccountInvitations` and transaction-owned gym mutex (`Persistence/TenantAccountLock`). See [Student lifecycle/rollout](Students.md#explicit-account-linkage-and-access-synchronization) for the explicitly approved exception to historical ficha-only state behavior, rollback guards and contention tradeoff. The migration is **UNAPPLIED** here. Existing recovery migration IDs/bodies and global SuperAdmin scope/index remain unchanged. The separately approved Trainer list/state extension below is bounded; login-email, role and profile editing remain deferred.
+
+### Approved Trainer account listing and access state
+
+`TrainersController` exposes only GymAdmin-authorized `GET /api/trainers` and bodyless CSRF-protected `PATCH /api/trainers/{accountId}/deactivate` and `/reactivate`. Validated actor role/gym claims are passed separately to existing `IAccountService`/`AccountService`, which independently validate authority, positive gym, pagination and bounded opaque identifiers. BLL owns `TrainerListRequest`, `TrainerListResponse` and read-only `TrainerResponse`; API does not map entities. All three actions reuse existing administrative no-store metadata, including authorization and validation short circuits, without changing existing filters.
+
+Existing `IAccountRepository`/`AccountRepository` return DAL `TrainerAccountPage` containing only Entity-owned non-persisted `TrainerAccountProjection` items (ID, email, enabled and email-confirmed flags), not full Identity entities or credentials. `AccountProfile` explicitly maps that safe projection to `TrainerResponse`. The no-tracking query filters same gym and Trainer role, counts all states, orders by account ID and applies database bounds. Count/items remain separate reads without snapshot consistency. No new profile, layer, dependency, model mapping, table, column or migration is introduced.
+
+State writers acquire the existing transaction-owned gym-row mutex before the target update; the actual SQL predicate checks gym, Trainer role, ID and changed enablement. Disabling rotates security/concurrency stamps atomically; enabling preserves the rotated security stamp and refreshes concurrency only. Repeats return success without stamp writes. Identity's optimistic concurrency rejects stale password writes rather than resurrecting enablement. These controls serialize with invitation/activation, leave all other account fields/fichas unchanged, and never use `StudentAccessSuspended` for Trainers. Isolated SQLite tests prove representative interleavings and rollback, not production SQL Server concurrency. See [operational contract](ActivationOperations.md#manage-trainer-account-access).
+
+BLL owns `Mappings/StudentProfile`, `AccountProfile`, and `GymProfile`. They map domain entities to public item responses using explicit constructor parameters. `AccountProfile` maps pure `Account` to `AccountResponse` and the separately approved minimal `PendingAdministratorResponse`, plus safe `TrainerAccountProjection` to `TrainerResponse`, never the Identity adapter `GymAccount`. No reverse maps or request-to-entity maps are registered. Business validation, trimming, email normalization, authorization, and trusted gym/role selection stay in services. Student writes still construct entities explicitly with trusted gym context.
 
 API `Program` calls `AddAutoMapper` once with the BLL `StudentProfile` marker, scanning only that assembly. Configuration is shared, not built per request; business services retain their scoped registrations. Only `StudentService`, `AccountService`, and `GymService` receive `IMapper`, and map repository-returned entities. Activation services and controllers do not receive it; DAL and Entity have no AutoMapper dependency. Tests validate configuration, constructor fields, null/collection behavior, persisted results, and the mapping boundary using real production profiles.
 
@@ -135,6 +164,18 @@ Installation authorization and passing tests are **not proof of production licen
 The official documentation states that missing keys produce warnings and invalid/expired keys produce errors, without disabling mapping or making outbound licensing calls. Tests use real mapper configurations without fabricated keys and do not suppress license diagnostics. Successful runtime mapping with a warning does not establish compliance. AutoMapper also documents fallback variables `AUTOMAPPER_LICENSE_KEY` and `LUCKYPENNY_LICENSE_KEY`; the explicit application setting takes precedence when supplied.
 
 ## Operational limits
+
+### Password recovery extension
+
+Anonymous, CSRF-protected `POST /api/account/forgot-password` and `POST /api/account/reset-password` belong to the existing `AuthenticationController`, BLL `IAccountService`/`AccountService` and DAL `IAccountRepository`/`AccountRepository`. Recovery business validation and all recovery persistence, including dispatcher maintenance and delivery leases, are consolidated into those account contracts; no separate recovery controller, business service or repository remains. The three public DTO classes belong to `DTOs/Accounts`. Reset returns only an internal scalar account ID so API can expire a matching caller's cookie without signing out a different account. No Identity entity or token is returned by HTTP, and no mapping profile is added.
+
+DAL owns `Persistence/Models/PasswordRecoveryOutbox`, its migration `20261109221729_AddPasswordRecoveryOutbox`, the dedicated 30-minute `PasswordResetTokenProvider` and the request-bound protected envelope. The existing Data Protection application/key ring remain unchanged; purposes `Static-X.PasswordRecovery.v1`, `Static-X.PasswordRecoveryDelivery.v1`, `Static-X.PasswordRecoveryMessage.v1` and `Static-X.PasswordReset.Identity.v1` are separate from activation. A hashed security-stamp binding, account ID, role and nullable gym snapshot constrain reset and delivery. No password hash or plaintext bearer token is copied into the outbox. Before first send, BLL protects the exact sender/recipient/final-link snapshot and DAL conditionally freezes it under the current lease in the existing `ProtectedPayload` column. Its `snapshot.v1:` envelope marker distinguishes it from the initial protected token without changing the migration/schema. Once frozen it cannot be replaced; retries use its original values, not current email or destination configuration.
+
+Serializable enqueue keeps token generation and the account snapshot consistent and coalesces unexpired, unsent requests for the same identity/stamp. Sent links are not revoked by another forgot request. Reset conditionally claims the persisted request before loading Identity, verifies its scope/stamp and Identity token, and commits consumption plus Identity's concurrency-checked hash/stamp update in one database transaction. Failed password policy or persistence rolls back the claim and writes. Successful reset clears protected delivery secrets and revokes other requests for that account, without resetting lockout. Every existing application cookie fails its next security-stamp validation; in-flight requests are not cancelled.
+
+BLL `IPasswordRecoveryDispatcher`/`PasswordRecoveryDispatcher` and `IPasswordRecoveryEmailSender` are independent of activation. API owns `PasswordRecoveryOutboxWorker` and `ResendPasswordRecoveryEmailSender`. The worker uses isolated scopes and 1/10/30-second delays; five-minute leases, stable provider keys and frozen-message retries survive scope/host replacement. Each iteration first invokes BLL's cancellation-only cleanup operation and the dedicated DAL maintenance method, inspecting at most 100 oldest-expiring payloads and clearing expired/terminal/stale secrets without mail configuration or decryption. Database/host availability and backlog determine eventual cleanup timing. Configuration is then checked before any leasing/sending; cleanup does not participate in anonymous forgot requests. A send can race a reset after the final validity check; this is not an exactly-once delivery guarantee and a delivered stale link cannot reset credentials. The ASP.NET fixed-window limiter applies only to forgot: five attempts per remote IP per 15 minutes, no queue, bounded `Retry-After`, per-process memory (not distributed). The built-in limiter uses its framework clock; persisted expiry and worker tests use `TimeProvider`.
+
+See [password recovery operations](ActivationOperations.md#recover-a-forgotten-password) for deployment prerequisites and HTTP contracts.
 
 Offline snapshot comparison and SQL generation validate model/history compatibility, not the state of any deployed database. Validate actual SQL Server deployment, persistent keys, service permissions, and Resend delivery separately under the approved operational process. See [activation operations](ActivationOperations.md).
 

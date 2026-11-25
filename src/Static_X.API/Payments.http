@@ -1,0 +1,59 @@
+@baseUrl = https://localhost:7226
+
+### Fetch a request token after authenticating with the existing account workflow.
+GET {{baseUrl}}/api/account/csrf
+
+### Staff table
+GET {{baseUrl}}/api/payments?page=1&pageSize=20&search=Ana&status=1
+
+### Tariff history
+GET {{baseUrl}}/api/payments/prices
+
+### Staff coverage summary and potential renewals (not debt or revenue)
+GET {{baseUrl}}/api/payments/summary
+
+### GymAdmin collections by inclusive paid-on dates, with voids separate
+GET {{baseUrl}}/api/payments/collections?from=2026-11-01&to=2026-11-30
+
+### Same-day collections; both dates are required, maximum 366 inclusive days
+GET {{baseUrl}}/api/payments/collections?from=2026-11-15&to=2026-11-15
+
+### Initial tariff (replace request token with the same-session value)
+POST {{baseUrl}}/api/payments/prices
+X-CSRF-TOKEN: {{csrfToken}}
+Content-Type: application/json
+
+{"amountCents":100099,"initialEffectiveFrom":"2026-11-01"}
+
+### Preview a manual payment
+POST {{baseUrl}}/api/payments/students/1/preview
+X-CSRF-TOKEN: {{csrfToken}}
+Content-Type: application/json
+
+{"paidOn":"2026-11-15","method":1}
+
+### Confirm the exact preview; retain this body for identical retries
+POST {{baseUrl}}/api/payments/students/1
+X-CSRF-TOKEN: {{csrfToken}}
+Content-Type: application/json
+
+{"paidOn":"2026-11-15","method":1,"previewToken":"{{previewToken}}","idempotencyKey":"example-payment-1"}
+
+### Staff history (foreign or missing ficha returns 404)
+GET {{baseUrl}}/api/payments/students/1?page=1&pageSize=20
+
+### Latest-only administrative correction
+POST {{baseUrl}}/api/payments/students/1/1/void
+X-CSRF-TOKEN: {{csrfToken}}
+Content-Type: application/json
+
+{"reason":"Correction of accidental registration"}
+
+### Own explicitly linked ficha
+GET {{baseUrl}}/api/student/me/profile
+
+### Own live coverage
+GET {{baseUrl}}/api/student/me/coverage
+
+### Own history without internal audit
+GET {{baseUrl}}/api/student/me/payments?page=1&pageSize=20

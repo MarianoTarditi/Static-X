@@ -14,6 +14,8 @@ using Static_X.API.Auth;
 using System.Security.Claims;
 using Microsoft.AspNetCore.DataProtection;
 using Resend;
+using System.Threading.RateLimiting;
+using System.Globalization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -45,9 +47,12 @@ builder.Services.AddIdentityCore<GymAccount>(options =>
         options.SignIn.RequireConfirmedEmail = true;
         options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
         options.Lockout.MaxFailedAccessAttempts = 5;
+        options.Tokens.PasswordResetTokenProvider = PasswordResetTokenProvider.ProviderName;
     })
     .AddEntityFrameworkStores<StaticXDbContext>()
-    .AddSignInManager();
+    .AddSignInManager()
+    .AddTokenProvider<PasswordResetTokenProvider>(PasswordResetTokenProvider.ProviderName);
+builder.Services.Configure<PasswordResetTokenProviderOptions>(_ => { });
 builder.Services.AddScoped<IUserClaimsPrincipalFactory<GymAccount>, GymClaimsPrincipalFactory>();
 builder.Services.ConfigureApplicationCookie(options =>
 {
@@ -66,6 +71,14 @@ builder.Services.ConfigureApplicationCookie(options =>
     };
     options.Events.OnValidatePrincipal = async context =>
     {
+        // Check every request, even at the exact cookie issuance time; the periodic validator alone delays revocation.
+        var signIn = context.HttpContext.RequestServices.GetRequiredService<SignInManager<GymAccount>>();
+        if (await signIn.ValidateSecurityStampAsync(context.Principal) is null)
+        {
+            context.RejectPrincipal();
+            await signIn.SignOutAsync();
+            return;
+        }
         await SecurityStampValidator.ValidatePrincipalAsync(context);
         if (context.Principal is null)
             return;
@@ -94,6 +107,12 @@ builder.Services.AddScoped<IAccountRepository, AccountRepository>();
 builder.Services.AddScoped<IAccountService, AccountService>();
 builder.Services.AddScoped<IStudentRepository, StudentRepository>();
 builder.Services.AddScoped<IStudentService, StudentService>();
+builder.Services.AddScoped<IDashboardRepository, DashboardRepository>();
+builder.Services.AddScoped<IDashboardService, DashboardService>();
+builder.Services.AddScoped<IRoutineRepository, RoutineRepository>();
+builder.Services.AddScoped<IRoutineService, RoutineService>();
+builder.Services.AddScoped<IPaymentRepository, PaymentRepository>();
+builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<IGymRepository, GymRepository>();
 builder.Services.AddScoped<IGymService, GymService>();
 builder.Services.AddSingleton(TimeProvider.System);
@@ -101,6 +120,9 @@ builder.Services.AddScoped<IActivationRepository, ActivationRepository>();
 builder.Services.AddScoped<IActivationService, ActivationService>();
 builder.Services.AddScoped<IActivationDeliveryRepository, ActivationDeliveryRepository>();
 builder.Services.AddScoped<IActivationDispatcher, ActivationDispatcher>();
+builder.Services.AddScoped<IPasswordRecoveryDispatcher, PasswordRecoveryDispatcher>();
+builder.Services.AddTransient<IPasswordRecoveryEmailSender, ResendPasswordRecoveryEmailSender>();
+builder.Services.AddHostedService<PasswordRecoveryOutboxWorker>();
 builder.Services.AddHostedService<Static_X.API.Integrations.ActivationOutboxWorker>();
 builder.Services.AddTransient<IActivationEmailSender, ResendActivationEmailSender>();
 builder.Services.AddHttpClient<ResendClient>();
@@ -114,18 +136,38 @@ builder.Services.AddTransient<IResend, ResendClient>();
 builder.Services.AddControllersWithViews(options => options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute()));
 
 builder.Services.AddOpenApi();
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("password-recovery", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.MapToIPv6().ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 5, Window = TimeSpan.FromMinutes(15), QueueLimit = 0, AutoReplenishment = true
+        }));
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        var seconds = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retry) ? retry.TotalSeconds : 900;
+        context.HttpContext.Response.StatusCode = 429;
+        context.HttpContext.Response.Headers.RetryAfter = Math.Clamp(Math.Ceiling(seconds), 1, 900).ToString(CultureInfo.InvariantCulture);
+        context.HttpContext.Response.Headers.CacheControl = "no-store";
+        await context.HttpContext.Response.WriteAsJsonAsync(new ProblemDetails { Status = 429, Title = "Too many recovery requests." }, cancellationToken);
+    };
+});
 
 var app = builder.Build();
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+    Static_X.API.ActivationPage.ActivationPageEndpoints.Map(app);
 }
 
 app.UseHttpsRedirection();
 
-app.UseWhen(context => context.Request.Path.StartsWithSegments("/api/students"), branch =>
+app.UseWhen(context => context.Request.Path.StartsWithSegments("/api/students") ||
+    context.Request.Path.StartsWithSegments("/api/student/me/routine"), branch =>
     branch.UseMiddleware<Static_X.API.Middleware.StudentApiErrorsMiddleware>());
+app.UseWhen(context => context.Request.Path.StartsWithSegments("/api/accounts/invitations"), branch =>
+    branch.UseMiddleware<Static_X.API.Middleware.InvitationApiErrorsMiddleware>());
 
 // Apply only to the new administrative GET endpoints, including authorization short circuits.
 app.Use(async (context, next) =>
@@ -137,6 +179,8 @@ app.Use(async (context, next) =>
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<Static_X.API.Middleware.PaymentAccessMiddleware>();
+app.UseRateLimiter();
 
 app.MapControllers();
 
