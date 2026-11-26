@@ -159,7 +159,7 @@ public sealed partial class AccountHttpTests
             if (change == "wrong-role") user.Role = AccountRole.Trainer;
             if (change == "disabled") user.IsEnabled = false;
             if (change == "link") (await db.Alumnos.SingleAsync()).AccountId = null;
-            if (change == "inactive") (await db.Alumnos.SingleAsync()).Activo = false;
+            if (change == "inactive") (await db.Alumnos.SingleAsync()).IsActive = false;
             await db.SaveChangesAsync();
         }
         Assert.Equal(HttpStatusCode.NotFound, (await app.PostAsync(actor, $"{InvitationsRoute}/{id}/resend?role=3", null)).StatusCode);
@@ -260,7 +260,7 @@ public sealed partial class AccountHttpTests
                 if (student is not null)
                 {
                     var ficha = await db.Alumnos.SingleAsync();
-                    Assert.Equal((id, true, "contact@example.invalid"), (ficha.AccountId, ficha.Activo, ficha.Email));
+                    Assert.Equal((id, true, "contact@example.invalid"), (ficha.AccountId, ficha.IsActive, ficha.Email));
                 }
             }
             clock.Now = start.AddHours(1);

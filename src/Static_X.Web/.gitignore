@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+.certs/
+.env
+.env.*
+!.env.example
+*.local
+*.tsbuildinfo
+test-results/

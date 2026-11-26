@@ -14,7 +14,7 @@ public static class VideoLibraryConfiguration
             entity.Property(v => v.Key).HasMaxLength(128);
             entity.Property(v => v.State).HasMaxLength(16).IsRequired();
             entity.HasIndex(v => new { v.State, v.NextAttemptAt });
-            entity.HasOne<Gimnasio>().WithMany().HasForeignKey(v => v.GymId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Gym>().WithMany().HasForeignKey(v => v.GymId).OnDelete(DeleteBehavior.Restrict);
         });
         builder.Entity<LibraryVideo>(entity =>
         {
@@ -31,7 +31,7 @@ public static class VideoLibraryConfiguration
             entity.Property(v => v.ObjectKey).HasMaxLength(128).IsRequired();
             entity.HasIndex(v => v.ObjectKey).IsUnique();
             entity.HasIndex(v => new { v.GymId, v.CreatedAt, v.Id });
-            entity.HasOne<Gimnasio>().WithMany().HasForeignKey(v => v.GymId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Gym>().WithMany().HasForeignKey(v => v.GymId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<VideoObject>().WithMany().HasForeignKey(v => v.ObjectKey).OnDelete(DeleteBehavior.Restrict);
         });
     }

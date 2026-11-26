@@ -18,14 +18,14 @@ public sealed class RoutineRepository : IRoutineRepository
 
     /// <summary>Busca la rutina actual de una ficha por gimnasio e identificador.</summary>
     public Task<RoutineReadResult?> FindForTrainerAsync(int gymId, int studentId, CancellationToken cancellationToken) =>
-        FindAsync(context.Alumnos.Where(s => s.GimnasioId == gymId && s.Id == studentId), cancellationToken);
+        FindAsync(context.Alumnos.Where(s => s.GymId == gymId && s.Id == studentId), cancellationToken);
 
     /// <summary>Busca la rutina actual de la ficha activa vinculada explícitamente a la cuenta.</summary>
     public Task<RoutineReadResult?> FindForStudentAsync(int gymId, string accountId, CancellationToken cancellationToken) =>
-        FindAsync(context.Alumnos.Where(s => s.GimnasioId == gymId && s.AccountId == accountId && s.Activo), cancellationToken);
+        FindAsync(context.Alumnos.Where(s => s.GymId == gymId && s.AccountId == accountId && s.IsActive), cancellationToken);
 
     /// <summary>Distingue una ficha inexistente de una ficha sin rutina y carga el contenido en orden.</summary>
-    private Task<RoutineReadResult?> FindAsync(IQueryable<Alumno> students, CancellationToken cancellationToken)
+    private Task<RoutineReadResult?> FindAsync(IQueryable<Student> students, CancellationToken cancellationToken)
     {
         var routines = context.StudentRoutines.Include(r => r.Days.OrderBy(d => d.Position))
             .ThenInclude(d => d.Exercises.OrderBy(e => e.Position));
@@ -48,7 +48,7 @@ public sealed class RoutineRepository : IRoutineRepository
             return new RoutineWriteResult(RoutineWriteOutcome.Forbidden);
 
         var studentId = publication.StudentId;
-        var target = context.Alumnos.Where(s => s.GimnasioId == gymId && s.Id == studentId);
+        var target = context.Alumnos.Where(s => s.GymId == gymId && s.Id == studentId);
         if (!await target.AnyAsync(cancellationToken))
             return new RoutineWriteResult(RoutineWriteOutcome.NotFound);
 

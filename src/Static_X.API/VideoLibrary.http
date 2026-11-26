@@ -1,0 +1,57 @@
+@baseUrl = https://localhost:7226
+@csrf = replace-with-token-from-account-csrf
+@videoId = 00000000-0000-0000-0000-000000000001
+@revision = 00000000-0000-0000-0000-000000000002
+
+### Obtain CSRF after signing in with the existing account flow; retain cookies.
+GET {{baseUrl}}/api/account/csrf
+
+### List current gym videos
+GET {{baseUrl}}/api/routines/videos?page=1&pageSize=20&category=exercise
+
+### Upload a local MP4 (adjust the local path before running)
+POST {{baseUrl}}/api/routines/videos
+X-CSRF-TOKEN: {{csrf}}
+Content-Type: multipart/form-data; boundary=video-upload
+
+--video-upload
+Content-Disposition: form-data; name="title"
+
+Squat demonstration
+--video-upload
+Content-Disposition: form-data; name="category"
+
+exercise
+--video-upload
+Content-Disposition: form-data; name="file"; filename="exercise.mp4"
+Content-Type: video/mp4
+
+< ./exercise.mp4
+--video-upload--
+
+### Full playback
+GET {{baseUrl}}/api/routines/videos/{{videoId}}/content
+
+### Inclusive range playback
+GET {{baseUrl}}/api/routines/videos/{{videoId}}/content
+Range: bytes=0-1023
+
+### Replace bytes, retaining metadata (refresh the revision from the result)
+PUT {{baseUrl}}/api/routines/videos/{{videoId}}/content?expectedRevision={{revision}}
+X-CSRF-TOKEN: {{csrf}}
+Content-Type: multipart/form-data; boundary=video-replacement
+
+--video-replacement
+Content-Disposition: form-data; name="file"; filename="replacement.mp4"
+Content-Type: video/mp4
+
+< ./replacement.mp4
+--video-replacement--
+
+### Delete using the current revision; repeating an old revision cannot delete a replacement
+DELETE {{baseUrl}}/api/routines/videos/{{videoId}}?expectedRevision={{revision}}
+X-CSRF-TOKEN: {{csrf}}
+
+### Unsatisfiable range (416 for an existing authorized entry)
+GET {{baseUrl}}/api/routines/videos/{{videoId}}/content
+Range: bytes=100000001-

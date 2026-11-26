@@ -6,12 +6,12 @@ using Microsoft.Extensions.Options;
 namespace DAL;
 
 /// <summary>Uses an isolated Identity protector and lifetime without changing other token providers.</summary>
-public sealed class PasswordResetTokenProvider : DataProtectorTokenProvider<GymAccount>
+public sealed class PasswordResetTokenProvider : DataProtectorTokenProvider<IdentityAccount>
 {
     public const string ProviderName = "Static-X.PasswordReset";
 
     public PasswordResetTokenProvider(IDataProtectionProvider protection,
-        IOptions<PasswordResetTokenProviderOptions> options, ILogger<DataProtectorTokenProvider<GymAccount>> logger)
+        IOptions<PasswordResetTokenProviderOptions> options, ILogger<DataProtectorTokenProvider<IdentityAccount>> logger)
         : base(protection, options, logger) { }
 }
 

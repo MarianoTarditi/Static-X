@@ -181,7 +181,7 @@ public sealed partial class AccountHttpTests
         Assert.Equal(HttpStatusCode.Accepted, queued.StatusCode);
         using (var scope = app.Factory.Services.CreateScope())
         {
-            var users = scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
             var user = (await users.FindByIdAsync(id))!;
             if (scenario == "expired") clock.Advance(TimeSpan.FromMinutes(30));
             else if (scenario == "password-changed") Assert.True((await users.ChangePasswordAsync(user, "CorrectPassword1!", "ChangedPassword3!")).Succeeded);

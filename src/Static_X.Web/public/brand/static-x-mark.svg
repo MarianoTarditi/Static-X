@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 685 440" fill="none">
+  <title>Static-X provisional mark</title>
+  <defs><linearGradient id="violet" x1="70" y1="430" x2="540" y2="30" gradientUnits="userSpaceOnUse"><stop stop-color="#301149"/><stop offset="1" stop-color="#b184e5"/></linearGradient></defs>
+  <g fill="url(#violet)">
+    <path d="M102 45h131l69 106-11 10-65-103H126l12 22h62l63 102-35 27-55-90h-28Z"/>
+    <path d="M29 418 480 42h176l-91 80-118 1L89 418Z"/>
+    <path d="m126 418 329-275h63L371 264l82 125h46l17 29H351l-42-86-102 86Z"/>
+  </g>
+</svg>

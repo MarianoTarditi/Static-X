@@ -125,7 +125,7 @@ public sealed class PaymentAnalyticsTests
         var notApplicable = await f.Service.SummaryAsync(1, AccountRole.Trainer, default);
         Assert.Equal(1, notApplicable.EstimatedRenewalCount);
         Assert.Null(notApplicable.EstimatedRenewalCents);
-        await f.Db.Alumnos.Where(s => s.GimnasioId == 1).ExecuteUpdateAsync(s => s.SetProperty(x => x.Activo, false));
+        await f.Db.Alumnos.Where(s => s.GymId == 1).ExecuteUpdateAsync(s => s.SetProperty(x => x.IsActive, false));
         f.Clock.Now = f.Clock.Now.AddDays(10);
         var empty = await f.Service.SummaryAsync(1, AccountRole.Trainer, default);
         Assert.Equal((0, 0, 0, 0, 0, 0, 0L), (empty.ActiveStudents, empty.NoValidPayment, empty.Expired, empty.DueSoon, empty.Current, empty.EstimatedRenewalCount, empty.EstimatedRenewalCents));
@@ -217,7 +217,7 @@ public sealed class PaymentAnalyticsTests
         Assert.Equal(3, app.Fault.Commands.Count);
         Assert.Contains("SUM(", app.Fault.Commands[0]); Assert.Contains("NOT EXISTS", app.Fault.Commands[0]);
         Assert.Contains("SUM(", app.Fault.Commands[1]);
-        db.Alumnos.AddRange(Enumerable.Range(10, 100).Select(id => new Alumno { Id = id, GimnasioId = 1, Nombre = "Additional", Apellido = "Ficha", Email = $"{id}@example.invalid" }));
+        db.Alumnos.AddRange(Enumerable.Range(10, 100).Select(id => new Student { Id = id, GymId = 1, FirstName = "Additional", LastName = "Ficha", Email = $"{id}@example.invalid" }));
         await db.SaveChangesAsync(); db.ChangeTracker.Clear(); app.Fault.Commands.Clear();
         Assert.Equal(101, (await repository.SummaryAsync(1, Today, Today.AddDays(6), new DateOnly(2026, 12, 1), default)).ActiveStudents);
         Assert.Equal(3, app.Fault.Commands.Count);
@@ -245,7 +245,7 @@ public sealed class PaymentAnalyticsTests
 
     private static async Task AddStudent(PaymentFixture f, int id, bool active)
     {
-        f.Db.Alumnos.Add(new Alumno { Id = id, GimnasioId = 1, Nombre = "Test", Apellido = "Ficha", Email = $"{id}@example.invalid", Activo = active });
+        f.Db.Alumnos.Add(new Student { Id = id, GymId = 1, FirstName = "Test", LastName = "Ficha", Email = $"{id}@example.invalid", IsActive = active });
         await f.Db.SaveChangesAsync();
     }
 

@@ -175,7 +175,7 @@ public sealed class PaymentServiceTests
         await using var fixture = await PaymentFixture.CreateAsync();
         var date = new DateOnly(2026, 11, 15);
         if (scenario == "before-last") await fixture.PayAsync(date);
-        if (scenario == "inactive") await fixture.Db.Alumnos.Where(s => s.Id == 1).ExecuteUpdateAsync(s => s.SetProperty(x => x.Activo, false));
+        if (scenario == "inactive") await fixture.Db.Alumnos.Where(s => s.Id == 1).ExecuteUpdateAsync(s => s.SetProperty(x => x.IsActive, false));
         if (scenario == "future") date = date.AddDays(1);
         if (scenario == "before-initial") date = new DateOnly(2026, 10, 31);
         if (scenario == "before-last") date = date.AddDays(-1);
@@ -228,10 +228,10 @@ public sealed class PaymentServiceTests
     {
         await using var fixture = await PaymentFixture.CreateAsync();
         var paid = await fixture.PayAsync(new DateOnly(2026, 11, 15));
-        await fixture.Db.Alumnos.Where(s => s.Id == 1).ExecuteUpdateAsync(s => s.SetProperty(x => x.Activo, false));
+        await fixture.Db.Alumnos.Where(s => s.Id == 1).ExecuteUpdateAsync(s => s.SetProperty(x => x.IsActive, false));
         Assert.Single(await fixture.Service.HistoryAsync(1, AccountRole.Trainer, "trainer", 1, new PaymentListRequest(), default));
         Assert.True(await fixture.VoidAsync(paid.Id));
-        Assert.False((await fixture.Db.Alumnos.AsNoTracking().SingleAsync(s => s.Id == 1)).Activo);
+        Assert.False((await fixture.Db.Alumnos.AsNoTracking().SingleAsync(s => s.Id == 1)).IsActive);
         var ledger = await fixture.Db.Payments.AsNoTracking().SingleAsync();
         Assert.Equal(("admin", "Correction"), (ledger.VoidedBy, ledger.VoidReason));
         Assert.Equal(fixture.Clock.Now, ledger.VoidedAt);
@@ -359,7 +359,7 @@ internal sealed class ReplayMissOnceRepository : IPaymentRepository
         return inner.FindReplayAsync(gymId, key, cancellationToken);
     }
     public Task<PaymentSnapshot?> SnapshotAsync(int gymId, int studentId, DateOnly paidOn, CancellationToken cancellationToken) => inner.SnapshotAsync(gymId, studentId, paidOn, cancellationToken);
-    public Task<Alumno?> FindOwnAsync(int gymId, string accountId, CancellationToken cancellationToken) => inner.FindOwnAsync(gymId, accountId, cancellationToken);
+    public Task<Student?> FindOwnAsync(int gymId, string accountId, CancellationToken cancellationToken) => inner.FindOwnAsync(gymId, accountId, cancellationToken);
     public Task<Payment> RegisterAsync(Payment payment, long revision, DateOnly today, CancellationToken cancellationToken) => inner.RegisterAsync(payment, revision, today, cancellationToken);
     public Task<bool> VoidAsync(int gymId, int studentId, long paymentId, string actorId, string reason, DateTimeOffset now, CancellationToken cancellationToken) => inner.VoidAsync(gymId, studentId, paymentId, actorId, reason, now, cancellationToken);
     public Task<GymPassPrice> SetPriceAsync(GymPassPrice price, bool initial, CancellationToken cancellationToken) => inner.SetPriceAsync(price, initial, cancellationToken);
@@ -395,10 +395,10 @@ internal sealed class PaymentFixture : IAsyncDisposable
         await connection.OpenAsync();
         var db = new StaticXDbContext(new DbContextOptionsBuilder<StaticXDbContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        db.Gimnasios.AddRange(new Gimnasio { Id = 1, Nombre = "First" }, new Gimnasio { Id = 2, Nombre = "Second" });
-        db.Users.Add(new GymAccount { Id = "student", UserName = "student", Email = "same@example.invalid", NormalizedEmail = "SAME@EXAMPLE.INVALID", GymId = 1, Role = AccountRole.Student });
-        db.Alumnos.AddRange(new Alumno { Id = 1, GimnasioId = 1, AccountId = "student", Nombre = "Ana", Apellido = "One", Email = "CONTACT@EXAMPLE.INVALID" },
-            new Alumno { Id = 2, GimnasioId = 2, Nombre = "Ana", Apellido = "Foreign", Email = "SAME@EXAMPLE.INVALID" });
+        db.Gimnasios.AddRange(new Gym { Id = 1, Name = "First" }, new Gym { Id = 2, Name = "Second" });
+        db.Users.Add(new IdentityAccount { Id = "student", UserName = "student", Email = "same@example.invalid", NormalizedEmail = "SAME@EXAMPLE.INVALID", GymId = 1, Role = AccountRole.Student });
+        db.Alumnos.AddRange(new Student { Id = 1, GymId = 1, AccountId = "student", FirstName = "Ana", LastName = "One", Email = "CONTACT@EXAMPLE.INVALID" },
+            new Student { Id = 2, GymId = 2, FirstName = "Ana", LastName = "Foreign", Email = "SAME@EXAMPLE.INVALID" });
         await db.SaveChangesAsync(); db.ChangeTracker.Clear();
         var fixture = new PaymentFixture(connection, db);
         if (initialPrice) await fixture.Service.SetPriceAsync(1, AccountRole.GymAdmin, "admin", new SetPassPriceRequest { AmountCents = 100099, InitialEffectiveFrom = new DateOnly(2026, 11, 1) }, default);

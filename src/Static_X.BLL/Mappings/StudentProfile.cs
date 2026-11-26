@@ -10,11 +10,11 @@ public sealed class StudentProfile : Profile
     /// <summary>Configura los parámetros del constructor de la respuesta sin modificar ni validar la entidad.</summary>
     public StudentProfile()
     {
-        CreateMap<Alumno, StudentResponse>()
+        CreateMap<Student, StudentResponse>()
             .ForCtorParam("id", options => options.MapFrom(source => source.Id))
-            .ForCtorParam("nombre", options => options.MapFrom(source => source.Nombre))
-            .ForCtorParam("apellido", options => options.MapFrom(source => source.Apellido))
+            .ForCtorParam("nombre", options => options.MapFrom(source => source.FirstName))
+            .ForCtorParam("apellido", options => options.MapFrom(source => source.LastName))
             .ForCtorParam("email", options => options.MapFrom(source => source.Email))
-            .ForCtorParam("activo", options => options.MapFrom(source => source.Activo));
+            .ForCtorParam("activo", options => options.MapFrom(source => source.IsActive));
     }
 }

@@ -213,7 +213,7 @@ public sealed partial class AccountHttpTests
         using var anonymous = app.Client();
         Assert.Equal(HttpStatusCode.Accepted, (await app.PostAsync(anonymous, "/api/account/forgot-password", new { email = "legacy-trainer-id@example.invalid", gymId = gym })).StatusCode);
         string recovery;
-        GymAccount original;
+        IdentityAccount original;
         using (var scope = app.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
@@ -273,7 +273,7 @@ public sealed partial class AccountHttpTests
             Assert.Equal((original.Email, original.EmailConfirmed, original.GymId, original.Role, original.LockoutEnd, original.AccessFailedCount),
                 (user.Email, user.EmailConfirmed, user.GymId, user.Role, user.LockoutEnd, user.AccessFailedCount));
             Assert.Equal(student, (await db.Alumnos.SingleAsync()).Id);
-            Assert.True((await db.Alumnos.SingleAsync()).Activo);
+            Assert.True((await db.Alumnos.SingleAsync()).IsActive);
             Assert.Null((await db.Alumnos.SingleAsync()).AccountId);
             Assert.Empty(await db.ActivationInvitations.ToListAsync());
             Assert.Single(await db.PasswordRecoveryOutbox.ToListAsync());
@@ -371,8 +371,8 @@ public sealed partial class AccountHttpTests
     private static async Task SeedTrainerAsync(TestApp app, int gym, string id, bool enabled, bool confirmed)
     {
         using var scope = app.Factory.Services.CreateScope();
-        var users = scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
-        var account = new GymAccount { Id = id, UserName = id.Length <= 256 ? id : "long-id-user", GymId = gym, Role = AccountRole.Trainer,
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
+        var account = new IdentityAccount { Id = id, UserName = id.Length <= 256 ? id : "long-id-user", GymId = gym, Role = AccountRole.Trainer,
             Email = id.Length <= 64 ? id + "@example.invalid" : "long-id@example.invalid", IsEnabled = enabled, EmailConfirmed = confirmed, LockoutEnabled = true };
         var result = confirmed ? await users.CreateAsync(account, "CorrectPassword1!") : await users.CreateAsync(account);
         Assert.True(result.Succeeded);

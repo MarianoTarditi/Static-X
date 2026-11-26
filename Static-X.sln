@@ -12,6 +12,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Static_X.API", "src\Static_
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Static_X.Tests", "tests\Static_X.Tests\Static_X.Tests.csproj", "{481CC328-1BC3-45E9-A7E1-555555555555}"
 EndProject
+Project("{54A90642-561A-4BB1-A94E-469ADEE60C69}") = "Static_X.Web", "src\Static_X.Web\Static_X.Web.esproj", "{BC14AA87-C36D-4936-B894-73D9211730A6}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -38,5 +40,7 @@ Global
 		{481CC328-1BC3-45E9-A7E1-555555555555}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{481CC328-1BC3-45E9-A7E1-555555555555}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{481CC328-1BC3-45E9-A7E1-555555555555}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BC14AA87-C36D-4936-B894-73D9211730A6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BC14AA87-C36D-4936-B894-73D9211730A6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 	EndGlobalSection
 EndGlobal

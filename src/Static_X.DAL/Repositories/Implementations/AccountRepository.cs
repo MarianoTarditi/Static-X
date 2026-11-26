@@ -14,13 +14,13 @@ namespace DAL.Repositories.Implementation;
 public sealed class AccountRepository : IAccountRepository
 {
     private readonly StaticXDbContext context;
-    private readonly UserManager<GymAccount> users;
-    private readonly SignInManager<GymAccount> signIn;
+    private readonly UserManager<IdentityAccount> users;
+    private readonly SignInManager<IdentityAccount> signIn;
     private readonly IDataProtectionProvider protection;
 
     /// <summary>Recibe el contexto compartido, los administradores de Identity y la protección persistente de secretos.</summary>
-    public AccountRepository(StaticXDbContext context, UserManager<GymAccount> users,
-        SignInManager<GymAccount> signIn, IDataProtectionProvider protection)
+    public AccountRepository(StaticXDbContext context, UserManager<IdentityAccount> users,
+        SignInManager<IdentityAccount> signIn, IDataProtectionProvider protection)
     {
         this.context = context;
         this.users = users;
@@ -74,7 +74,7 @@ public sealed class AccountRepository : IAccountRepository
         if (gymId <= 0 || !Enum.IsDefined(role) || role == AccountRole.SuperAdmin)
             throw new ArgumentOutOfRangeException(nameof(role));
         var id = Guid.NewGuid().ToString("N");
-        var user = new GymAccount
+        var user = new IdentityAccount
         {
             Id = id,
             UserName = id, 
@@ -323,12 +323,12 @@ public sealed class AccountRepository : IAccountRepository
                 .SetProperty(o => o.LeaseOwner, (Guid?)null).SetProperty(o => o.LeaseExpiresAt, (DateTime?)null), cancellationToken);
 
     /// <summary>Exige correo confirmado, contraseña y una combinación persistida válida de gimnasio y rol.</summary>
-    private static bool Eligible(GymAccount user) => user.IsEnabled && user.EmailConfirmed && !string.IsNullOrEmpty(user.PasswordHash) &&
+    private static bool Eligible(IdentityAccount user) => user.IsEnabled && user.EmailConfirmed && !string.IsNullOrEmpty(user.PasswordHash) &&
         !string.IsNullOrEmpty(user.SecurityStamp) && (user.GymId is null ? user.Role == AccountRole.SuperAdmin :
             user.GymId > 0 && user.Role is AccountRole.GymAdmin or AccountRole.Trainer or AccountRole.Student);
 
     /// <summary>Comprueba elegibilidad, ámbito, rol y vínculo criptográfico con el sello original.</summary>
-    private static bool Matches(GymAccount user, PasswordRecoveryOutbox request) => Eligible(user) &&
+    private static bool Matches(IdentityAccount user, PasswordRecoveryOutbox request) => Eligible(user) &&
         user.GymId == request.GymId && user.Role == request.Role && Bind(user.SecurityStamp) == request.StampBinding;
 
     /// <summary>Vincula la solicitud al sello sin almacenar otra copia en claro.</summary>

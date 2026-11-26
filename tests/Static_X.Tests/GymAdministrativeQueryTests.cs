@@ -19,8 +19,8 @@ public sealed class GymAdministrativeQueryTests
     public async Task Repository_GymPages_OrderAllGymsAndRetainTotalPastEndWithoutWrites()
     {
         await using var db = await QueryDatabase.CreateAsync();
-        db.Context.Gimnasios.AddRange(new Gimnasio { Id = 30, Nombre = "Third" },
-            new Gimnasio { Id = 10, Nombre = "First" }, new Gimnasio { Id = 20, Nombre = "Second" });
+        db.Context.Gimnasios.AddRange(new Gym { Id = 30, Name = "Third" },
+            new Gym { Id = 10, Name = "First" }, new Gym { Id = 20, Name = "Second" });
         await db.Context.SaveChangesAsync();
         db.BeginReadOnly();
         var repository = new GymRepository(db.Context);
@@ -29,7 +29,7 @@ public sealed class GymAdministrativeQueryTests
         Assert.Equal(3, first.TotalCount);
         var page = await repository.ListAsync(1, 1, default);
         Assert.Equal(20, Assert.Single(page.Items).Id);
-        Assert.Equal("Second", page.Items[0].Nombre);
+        Assert.Equal("Second", page.Items[0].Name);
         Assert.Equal(3, page.TotalCount);
         var end = await repository.ListAsync(3, 1, default);
         Assert.Empty(end.Items);
@@ -61,8 +61,8 @@ public sealed class GymAdministrativeQueryTests
     public async Task Repository_PendingPredicate_ExactlyMatchesReissueEligibility(string scenario, bool eligible)
     {
         await using var db = await QueryDatabase.CreateAsync();
-        db.Context.Gimnasios.AddRange(new Gimnasio { Id = 1, Nombre = "Selected" }, new Gimnasio { Id = 2, Nombre = "Other" });
-        var account = new GymAccount
+        db.Context.Gimnasios.AddRange(new Gym { Id = 1, Name = "Selected" }, new Gym { Id = 2, Name = "Other" });
+        var account = new IdentityAccount
         {
             Id = "opaque-account", UserName = "opaque-account", Email = "admin@example.invalid",
             NormalizedEmail = "ADMIN@EXAMPLE.INVALID", GymId = 1, Role = AccountRole.GymAdmin,
@@ -75,12 +75,12 @@ public sealed class GymAdministrativeQueryTests
         if (scenario == "other-gym") account.GymId = 2;
         db.Context.Users.Add(account);
         if (scenario == "wrong-provision-account")
-            db.Context.Users.Add(new GymAccount { Id = "other-account", UserName = "other-account", GymId = 1,
+            db.Context.Users.Add(new IdentityAccount { Id = "other-account", UserName = "other-account", GymId = 1,
                 Role = AccountRole.Trainer, Email = "other@example.invalid", NormalizedEmail = "OTHER@EXAMPLE.INVALID" });
         if (scenario != "no-provision")
-            db.Context.ProvisioningRequests.Add(new ProvisioningRequest
-            { Key = "request", GymId = scenario == "wrong-provision-gym" ? 2 : 1,
-                AccountId = scenario == "wrong-provision-account" ? "other-account" : account.Id });
+            db.Context.ProvisioningRequests.Add(new GymProvisioningRecord
+            { IdempotencyKey = "request", GymId = scenario == "wrong-provision-gym" ? 2 : 1,
+                InitialAdminAccountId = scenario == "wrong-provision-account" ? "other-account" : account.Id });
         if (scenario != "missing-invitation")
         {
             var invitation = new ActivationInvitation
@@ -252,12 +252,12 @@ public sealed class GymAdministrativeQueryTests
         public bool Empty { get; set; }
         public bool CancelAlways { get; set; }
 
-        public Task<Gimnasio> AddAsync(Gimnasio gym, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<Gym> AddAsync(Gym gym, CancellationToken cancellationToken) => throw new NotSupportedException();
 
         public Task<GymPage> ListAsync(int offset, int pageSize, CancellationToken cancellationToken)
         {
             Record(0, offset, pageSize, cancellationToken);
-            return Task.FromResult(new GymPage(Empty ? [] : [new Gimnasio { Id = 29, Nombre = "Persisted gym" }], 42));
+            return Task.FromResult(new GymPage(Empty ? [] : [new Gym { Id = 29, Name = "Persisted gym" }], 42));
         }
 
         public Task<PendingAdministratorPage?> ListPendingAdministratorsAsync(int gymId, int offset, int pageSize, CancellationToken cancellationToken)

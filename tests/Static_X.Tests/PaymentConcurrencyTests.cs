@@ -26,8 +26,8 @@ public sealed class PaymentConcurrencyTests
             await using (var db = new StaticXDbContext(options))
             {
                 await db.Database.EnsureCreatedAsync();
-                db.Gimnasios.Add(new Gimnasio { Id = 1, Nombre = "Concurrent test" });
-                db.Alumnos.Add(new Alumno { Id = 1, GimnasioId = 1, Nombre = "Ana", Apellido = "One", Email = "ANA@EXAMPLE.INVALID" });
+                db.Gimnasios.Add(new Gym { Id = 1, Name = "Concurrent test" });
+                db.Alumnos.Add(new Student { Id = 1, GymId = 1, FirstName = "Ana", LastName = "One", Email = "ANA@EXAMPLE.INVALID" });
                 await db.SaveChangesAsync();
                 var service = new PaymentService(new PaymentRepository(db), clock, TestMapper.Instance, protection);
                 await service.SetPriceAsync(1, AccountRole.GymAdmin, "admin", new SetPassPriceRequest { AmountCents = 100099, InitialEffectiveFrom = new DateOnly(2026, 11, 1) }, default);

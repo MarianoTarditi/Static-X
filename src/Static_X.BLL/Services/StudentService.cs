@@ -31,12 +31,12 @@ public sealed class StudentService : IStudentService
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(gimnasioId);
         ArgumentNullException.ThrowIfNull(request);
         var normalizedEmail = NormalizeEmail(request.Email);
-        var student = new Alumno
+        var student = new Student
         {
-            GimnasioId = gimnasioId,
-            Activo = true,
-            Nombre = Required(request.Nombre, "nombre"),
-            Apellido = Required(request.Apellido, "apellido"),
+            GymId = gimnasioId,
+            IsActive = true,
+            FirstName = Required(request.Nombre, "nombre"),
+            LastName = Required(request.Apellido, "apellido"),
             Email = normalizedEmail
         };
         try

@@ -39,7 +39,9 @@ public sealed class DtoContractTests
         typeof(PaymentStudentResponse), typeof(PaymentListResponse), typeof(PaymentAuditResponse),
         typeof(PaymentSummaryResponse), typeof(PaymentCollectionRequest), typeof(PaymentCollectionResponse), typeof(PaymentCollectionMethodResponse),
         typeof(PublishRoutineRequest), typeof(RoutineDayRequest), typeof(RoutineExerciseRequest),
-        typeof(RoutineEnvelopeResponse), typeof(RoutineResponse), typeof(RoutineDayResponse), typeof(RoutineExerciseResponse)
+        typeof(RoutineEnvelopeResponse), typeof(RoutineResponse), typeof(RoutineDayResponse), typeof(RoutineExerciseResponse),
+        typeof(CreateVideoRequest), typeof(VideoContentResponse), typeof(VideoListRequest), typeof(VideoListResponse),
+        typeof(VideoRangeRequest), typeof(VideoResponse)
     ];
 
     [Fact]
@@ -165,7 +167,7 @@ public sealed class DtoContractTests
             .UseSetting("Activation:KeyRingPath", ""));
         var actions = factory.Services.GetRequiredService<IActionDescriptorCollectionProvider>().ActionDescriptors.Items
             .Cast<ControllerActionDescriptor>().ToArray();
-        Assert.Equal(43, actions.Length);
+        Assert.Equal(48, actions.Length);
         Assert.All(actions, action => Assert.Equal(typeof(Program).Assembly, action.ControllerTypeInfo.Assembly));
         var dashboardAction = Assert.Single(actions, action => action.ControllerTypeInfo.AsType() == typeof(DashboardController));
         Assert.Equal(nameof(DashboardController.Get), dashboardAction.ActionName);
@@ -176,6 +178,13 @@ public sealed class DtoContractTests
             parameter => parameter.ParameterType == typeof(PublishRoutineRequest));
         var selfRoutineAction = Assert.Single(actions, action => action.ControllerTypeInfo.AsType() == typeof(MyRoutineController));
         Assert.Equal(nameof(MyRoutineController.Read), selfRoutineAction.ActionName);
+        var videoActions = actions.Where(action => action.ControllerTypeInfo.AsType() == typeof(VideoLibraryController)).ToArray();
+        Assert.Equal(new[] { nameof(VideoLibraryController.Content), nameof(VideoLibraryController.Delete), nameof(VideoLibraryController.List),
+            nameof(VideoLibraryController.Replace), nameof(VideoLibraryController.Upload) }, videoActions.Select(action => action.ActionName).Order());
+        var videoAction = Assert.Single(videoActions, action => action.ActionName == nameof(VideoLibraryController.List));
+        Assert.Contains(videoAction.Parameters, parameter => parameter.ParameterType == typeof(VideoListRequest));
+        Assert.Contains(videoActions.Single(action => action.ActionName == nameof(VideoLibraryController.Upload)).Parameters,
+            parameter => parameter.ParameterType == typeof(CreateVideoRequest));
         var provider = factory.Services.GetRequiredService<IModelMetadataProvider>();
         foreach (var type in new[] { typeof(LoginRequest), typeof(ChangePasswordRequest), typeof(ActivateAccountRequest), typeof(CreateStudentRequest), typeof(UpdateStudentRequest), typeof(InviteAccountRequest) })
         {

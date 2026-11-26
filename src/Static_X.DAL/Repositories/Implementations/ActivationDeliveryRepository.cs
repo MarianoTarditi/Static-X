@@ -24,7 +24,7 @@ public sealed class ActivationDeliveryRepository : IActivationDeliveryRepository
                 context.TenantInvitationRequests.Any(r => r.GymId == i.GymId && r.AccountId == u.Id &&
                     r.Role == i.ExpectedRole && r.NormalizedEmail == u.NormalizedEmail &&
                     (r.Role == AccountRole.Trainer || r.Role == AccountRole.Student &&
-                        context.Alumnos.Any(s => s.Id == r.StudentId && s.GimnasioId == i.GymId && s.Activo && s.AccountId == u.Id))))));
+                        context.Alumnos.Any(s => s.Id == r.StudentId && s.GymId == i.GymId && s.IsActive && s.AccountId == u.Id))))));
 
     /// <summary>Descarta tokens de invitaciones terminadas e intenta reservar durante cinco minutos un envío pendiente y vigente.</summary>
     public async Task<ActivationDelivery?> LeaseDueAsync(DateTimeOffset now, CancellationToken cancellationToken)
@@ -69,8 +69,8 @@ public sealed class ActivationDeliveryRepository : IActivationDeliveryRepository
 
     /// <summary>Comprueba que la reserva siga vigente y que la invitación y la cuenta asociadas aún permitan el envío.</summary>
     public Task<bool> IsCurrentAsync(ActivationDelivery delivery, DateTimeOffset now, CancellationToken cancellationToken) =>
-        context.ActivationOutbox.AsNoTracking().AnyAsync(o => o.Id == delivery.JobId &&
-            o.LeaseOwner == delivery.LeaseOwner && o.LeaseExpiresAt > now.UtcDateTime &&
+        context.ActivationOutbox.AsNoTracking().AnyAsync(o => o.Id == delivery.OutboxEntryId &&
+            o.LeaseOwner == delivery.LeaseId && o.LeaseExpiresAt > now.UtcDateTime &&
             o.SentAt == null && o.ProtectedToken != string.Empty &&
             EligibleInvitations(now.UtcDateTime).Any(i => i.Id == o.InvitationId), cancellationToken);
 
@@ -81,11 +81,11 @@ public sealed class ActivationDeliveryRepository : IActivationDeliveryRepository
         var utc = now.UtcDateTime;
         // An unknown provider outcome is retried with the same provider idempotency key.
         var count = await context.ActivationOutbox.AsNoTracking()
-            .Where(o => o.Id == delivery.JobId && o.LeaseOwner == delivery.LeaseOwner)
+            .Where(o => o.Id == delivery.OutboxEntryId && o.LeaseOwner == delivery.LeaseId)
             .Select(o => o.AttemptCount).SingleOrDefaultAsync(cancellationToken);
         var delay = TimeSpan.FromMinutes(Math.Min(60, Math.Pow(2, Math.Min(count, 6))));
-        await context.ActivationOutbox.Where(o => o.Id == delivery.JobId &&
-                o.LeaseOwner == delivery.LeaseOwner && o.SentAt == null)
+        await context.ActivationOutbox.Where(o => o.Id == delivery.OutboxEntryId &&
+                o.LeaseOwner == delivery.LeaseId && o.SentAt == null)
             .ExecuteUpdateAsync(s => s.SetProperty(o => o.AttemptCount, o => o.AttemptCount + 1)
                 .SetProperty(o => o.SentAt, accepted ? utc : (DateTime?)null)
                 .SetProperty(o => o.ProtectedToken, o => !accepted && o.ProtectedToken != string.Empty &&

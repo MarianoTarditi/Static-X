@@ -20,11 +20,11 @@ public sealed class DashboardRepository : IDashboardRepository
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(gymId);
         return await context.Alumnos.AsNoTracking()
-            .Where(student => student.GimnasioId == gymId)
-            .GroupBy(student => student.GimnasioId)
-            .Select(group => new DashboardStudentCounts(group.Count(), group.Count(student => student.Activo),
-                group.Count(student => !student.Activo),
-                group.Count(student => student.Activo && student.AccountId == null)))
+            .Where(student => student.GymId == gymId)
+            .GroupBy(student => student.GymId)
+            .Select(group => new DashboardStudentCounts(group.Count(), group.Count(student => student.IsActive),
+                group.Count(student => !student.IsActive),
+                group.Count(student => student.IsActive && student.AccountId == null)))
             .SingleOrDefaultAsync(cancellationToken) ?? new DashboardStudentCounts(0, 0, 0, 0);
     }
 }

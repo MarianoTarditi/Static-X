@@ -87,7 +87,7 @@ public sealed class PaymentService : IPaymentService
     {
         if (studentId <= 0 || paidOn == default || paidOn > Today() || !Enum.IsDefined(method)) throw new ArgumentException("Invalid payment date or method.");
         var snapshot = await repository.SnapshotAsync(gymId, studentId, paidOn, cancellationToken) ?? throw new KeyNotFoundException();
-        if (!snapshot.Student.Activo) throw new InvalidOperationException("The student ficha must be active.");
+        if (!snapshot.Student.IsActive) throw new InvalidOperationException("The student ficha must be active.");
         if (snapshot.Price is null) throw new InvalidOperationException("Configure an initial tariff covering the payment date.");
         if (snapshot.LastPayment is not null && paidOn < snapshot.LastPayment.PaidOn) throw new ArgumentException("Payment date precedes the last payment.");
         return snapshot;
@@ -100,7 +100,7 @@ public sealed class PaymentService : IPaymentService
         var start = prior is not null && prior.CoverageEndExclusive > paidOn ? prior.CoverageEndExclusive : paidOn;
         return new Payment
         {
-            GymId = snapshot.Student.GimnasioId,
+            GymId = snapshot.Student.GymId,
             StudentId = snapshot.Student.Id,
             Sequence = checked(snapshot.Student.PaymentRevision + 1),
             PreviousPaymentId = prior?.Id,
@@ -196,7 +196,7 @@ public sealed class PaymentService : IPaymentService
         var last = snapshot.LastPayment; var through = last?.CoverageEndExclusive.AddDays(-1);
         var status = last is null ? PaymentStatus.NoPayments : today >= last.CoverageEndExclusive ? PaymentStatus.Expired :
             through!.Value.DayNumber - today.DayNumber <= 5 ? PaymentStatus.ExpiringSoon : PaymentStatus.Current;
-        return new PaymentStudentResponse(snapshot.Student.Id, snapshot.Student.Nombre + " " + snapshot.Student.Apellido, snapshot.Student.Activo, snapshot.Price?.AmountCents,
+        return new PaymentStudentResponse(snapshot.Student.Id, snapshot.Student.FirstName + " " + snapshot.Student.LastName, snapshot.Student.IsActive, snapshot.Price?.AmountCents,
             last is null ? null : mapper.Map<PaymentResponse>(last), today, through, last?.CoverageEndExclusive, status);
     }
 
@@ -210,7 +210,7 @@ public sealed class PaymentService : IPaymentService
     }
 
     /// <summary>Resuelve la ficha propia exclusivamente por vínculo explícito y rol Student.</summary>
-    private Task<Alumno?> OwnAsync(int gymId, AccountRole role, string accountId, CancellationToken cancellationToken)
+    private Task<Student?> OwnAsync(int gymId, AccountRole role, string accountId, CancellationToken cancellationToken)
     {
         if (gymId <= 0 || role != AccountRole.Student) throw new UnauthorizedAccessException(); Actor(accountId);
         return repository.FindOwnAsync(gymId, accountId, cancellationToken);

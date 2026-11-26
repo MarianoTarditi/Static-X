@@ -17,7 +17,7 @@ public sealed class GymRepository : IGymRepository
     }
 
     /// <summary>Agrega el gimnasio al contexto, guarda los cambios y devuelve la entidad persistida.</summary>
-    public async Task<Gimnasio> AddAsync(Gimnasio gym, CancellationToken cancellationToken)
+    public async Task<Gym> AddAsync(Gym gym, CancellationToken cancellationToken)
     {
         await context.Gimnasios.AddAsync(gym, cancellationToken);
         await context.SaveChangesAsync(cancellationToken);
@@ -41,7 +41,7 @@ public sealed class GymRepository : IGymRepository
             return null;
         var pending = context.Users.AsNoTracking().Where(u => u.GymId == gymId &&
             u.Role == AccountRole.GymAdmin && u.IsEnabled && !u.EmailConfirmed && u.PasswordHash == null &&
-            context.ProvisioningRequests.Any(r => r.GymId == gymId && r.AccountId == u.Id));
+            context.ProvisioningRequests.Any(r => r.GymId == gymId && r.InitialAdminAccountId == u.Id));
         var count = await pending.CountAsync(cancellationToken);
         var items = await pending.OrderBy(u => u.Id).Skip(offset).Take(pageSize)
             .Select(u => new Account(u.Id, u.GymId, u.Email!, u.Role)).ToArrayAsync(cancellationToken);

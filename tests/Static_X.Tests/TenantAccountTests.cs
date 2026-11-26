@@ -55,7 +55,7 @@ public sealed class TenantAccountTests
         string persistedBefore;
         using (var concurrent = db.CreateScope())
         {
-            var users = concurrent.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+            var users = concurrent.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
             var current = (await users.FindByIdAsync(account.Id))!;
             current.PhoneNumber = "concurrent-change";
             Assert.True((await users.UpdateAsync(current)).Succeeded);
@@ -68,7 +68,7 @@ public sealed class TenantAccountTests
         using var verification = db.CreateScope();
         var persisted = await verification.ServiceProvider.GetRequiredService<StaticXDbContext>().Users.SingleAsync();
         Assert.True(persistedBefore == System.Text.Json.JsonSerializer.Serialize(persisted), "Concurrency failure must preserve the winning update, password hash and security stamp.");
-        var verifier = verification.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+        var verifier = verification.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
         Assert.True(await verifier.CheckPasswordAsync(persisted, "CorrectPassword1!"));
         Assert.False(await verifier.CheckPasswordAsync(persisted, "NewPassword2!"));
     }
@@ -210,7 +210,7 @@ public sealed class TenantAccountTests
     {
         await using var db = await AccountDatabase.CreateAsync();
         var gym = await db.Gyms.AddAsync(new CreateGymRequest("Existing"));
-        var account = new GymAccount { Id = "invalid", UserName = "invalid", Email = "invalid@example.com", NormalizedEmail = "INVALID@EXAMPLE.COM",
+        var account = new IdentityAccount { Id = "invalid", UserName = "invalid", Email = "invalid@example.com", NormalizedEmail = "INVALID@EXAMPLE.COM",
             GymId = scenario is "global-with-gym" or "unknown-role" ? gym.Id : scenario == "missing-gym" ? gym.Id + 1 : null,
             Role = scenario switch { "admin-without-gym" => AccountRole.GymAdmin, "trainer-without-gym" => AccountRole.Trainer,
                 "student-without-gym" or "missing-gym" => AccountRole.Student, "unknown-role" => (AccountRole)99, _ => AccountRole.SuperAdmin } };
@@ -223,14 +223,14 @@ public sealed class TenantAccountTests
     public async Task AccountSchema_GlobalEmailUnique_AllowsSameEmailInSeparateTenantsWithoutFakeGym()
     {
         await using var db = await AccountDatabase.CreateAsync();
-        var global = new GymAccount { Id = "global", UserName = "global", Email = "same@example.com", Role = AccountRole.SuperAdmin };
+        var global = new IdentityAccount { Id = "global", UserName = "global", Email = "same@example.com", Role = AccountRole.SuperAdmin };
         Assert.True((await db.Users.CreateAsync(global, "GlobalPassword1!")).Succeeded);
         Assert.Equal(0, await db.Context.Gimnasios.CountAsync());
         var first = await db.Gyms.AddAsync(new CreateGymRequest("First"));
         var second = await db.Gyms.AddAsync(new CreateGymRequest("Second"));
         await db.Accounts.CreateAsync(first.Id, new CreateAccountRequest("same@example.com", "TenantPassword1!"), AccountRole.GymAdmin);
         await db.Accounts.CreateAsync(second.Id, new CreateAccountRequest("same@example.com", "TenantPassword1!"), AccountRole.Student);
-        await Assert.ThrowsAsync<DbUpdateException>(() => db.Users.CreateAsync(new GymAccount
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.Users.CreateAsync(new IdentityAccount
         { Id = "duplicate", UserName = "duplicate", Email = "SAME@example.com", Role = AccountRole.SuperAdmin }, "OtherPassword1!"));
         Assert.Equal(3, await db.Context.Users.CountAsync());
         Assert.Equal(1, await db.Context.Users.CountAsync(u => u.GymId == null));
@@ -253,11 +253,11 @@ public sealed class TenantAccountTests
         private readonly ServiceProvider provider;
         private readonly IServiceScope scope;
         public StaticXDbContext Context { get; }
-        public UserManager<GymAccount> Users { get; }
+        public UserManager<IdentityAccount> Users { get; }
         public AccountService Accounts { get; }
         public GymService Gyms { get; }
         public IDataProtectionProvider Protection { get; } = new EphemeralDataProtectionProvider();
-        public SignInManager<GymAccount> SignIn => scope.ServiceProvider.GetRequiredService<SignInManager<GymAccount>>();
+        public SignInManager<IdentityAccount> SignIn => scope.ServiceProvider.GetRequiredService<SignInManager<IdentityAccount>>();
         public IServiceScope CreateScope() => provider.CreateScope();
 
         private AccountDatabase(SqliteConnection connection, ServiceProvider provider, IServiceScope scope)
@@ -266,9 +266,9 @@ public sealed class TenantAccountTests
             this.provider = provider;
             this.scope = scope;
             Context = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
-            Users = scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+            Users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
             Accounts = new AccountService(new AccountRepository(Context, Users,
-                scope.ServiceProvider.GetRequiredService<SignInManager<GymAccount>>(), Protection), TestMapper.Instance,
+                scope.ServiceProvider.GetRequiredService<SignInManager<IdentityAccount>>(), Protection), TestMapper.Instance,
                 Protection, new ConfigurationBuilder().Build(), TimeProvider.System);
             Gyms = new GymService(new GymRepository(Context), TestMapper.Instance);
         }
@@ -281,7 +281,7 @@ public sealed class TenantAccountTests
             services.AddLogging();
             services.AddAuthentication(IdentityConstants.ApplicationScheme).AddIdentityCookies();
             services.AddDbContext<StaticXDbContext>(options => options.UseSqlite(connection));
-            services.AddIdentityCore<GymAccount>(options => options.User.RequireUniqueEmail = false)
+            services.AddIdentityCore<IdentityAccount>(options => options.User.RequireUniqueEmail = false)
                 .AddEntityFrameworkStores<StaticXDbContext>().AddSignInManager();
             var provider = services.BuildServiceProvider();
             var db = new AccountDatabase(connection, provider, provider.CreateScope());

@@ -38,10 +38,10 @@ public sealed class StudentHttpTests
         {
             var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
             db.Alumnos.AddRange(
-                new Alumno { Id = 1, GimnasioId = gym, Nombre = "Ana", Apellido = "One", Email = "ONE@EXAMPLE.COM" },
-                new Alumno { Id = 2, GimnasioId = gym, Nombre = "Bea", Apellido = "Anabel", Email = "TWO@EXAMPLE.COM", Activo = false },
-                new Alumno { Id = 3, GimnasioId = gym, Nombre = "Bea", Apellido = "Three", Email = "ANA@EXAMPLE.COM", Activo = false },
-                new Alumno { Id = 4, GimnasioId = other, Nombre = "Ana", Apellido = "Four", Email = "ANA@EXAMPLE.COM", Activo = false });
+                new Student { Id = 1, GymId = gym, FirstName = "Ana", LastName = "One", Email = "ONE@EXAMPLE.COM" },
+                new Student { Id = 2, GymId = gym, FirstName = "Bea", LastName = "Anabel", Email = "TWO@EXAMPLE.COM", IsActive = false },
+                new Student { Id = 3, GymId = gym, FirstName = "Bea", LastName = "Three", Email = "ANA@EXAMPLE.COM", IsActive = false },
+                new Student { Id = 4, GymId = other, FirstName = "Ana", LastName = "Four", Email = "ANA@EXAMPLE.COM", IsActive = false });
             await db.SaveChangesAsync();
         }
         foreach (var (filter, expected, total) in new[]
@@ -68,8 +68,8 @@ public sealed class StudentHttpTests
         using (var scope = app.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
-            db.Alumnos.AddRange(Enumerable.Range(1, 25).Select(i => new Alumno
-            { Id = i, GimnasioId = gym, Nombre = "Ana", Apellido = "Smith", Email = $"A{i}@EXAMPLE.COM", Activo = i % 2 == 0 }));
+            db.Alumnos.AddRange(Enumerable.Range(1, 25).Select(i => new Student
+            { Id = i, GymId = gym, FirstName = "Ana", LastName = "Smith", Email = $"A{i}@EXAMPLE.COM", IsActive = i % 2 == 0 }));
             await db.SaveChangesAsync();
         }
         foreach (var (query, page, size, ids) in new[]
@@ -166,7 +166,7 @@ public sealed class StudentHttpTests
 
         using var scope = app.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
-        Assert.Equal(gym, (await db.Alumnos.SingleAsync()).GimnasioId);
+        Assert.Equal(gym, (await db.Alumnos.SingleAsync()).GymId);
         Assert.Equal(1, await db.Users.CountAsync());
         Assert.Empty(await db.ActivationInvitations.ToListAsync());
         Assert.Empty(await db.ActivationOutbox.ToListAsync());
@@ -322,7 +322,7 @@ public sealed class StudentHttpTests
         var csrf = await app.TokenAsync(client);
         using (var scope = app.Factory.Services.CreateScope())
         {
-            var users = scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
             var user = await scope.ServiceProvider.GetRequiredService<StaticXDbContext>().Users.SingleAsync();
             user.Role = AccountRole.Student;
             Assert.True((await users.UpdateAsync(user)).Succeeded);
@@ -434,7 +434,7 @@ public sealed class StudentHttpTests
         using var scope = app.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
         var student = await db.Alumnos.SingleAsync();
-        Assert.Equal((id, gym, "Bea", "Jones", "BEA@EXAMPLE.COM"), (student.Id, student.GimnasioId, student.Nombre, student.Apellido, student.Email));
+        Assert.Equal((id, gym, "Bea", "Jones", "BEA@EXAMPLE.COM"), (student.Id, student.GymId, student.FirstName, student.LastName, student.Email));
         Assert.Equal(beforeAccountJson, JsonSerializer.Serialize(await db.Users.SingleAsync()));
         Assert.Empty(await db.ActivationInvitations.ToListAsync());
         Assert.Empty(await db.ActivationOutbox.ToListAsync());
@@ -465,7 +465,7 @@ public sealed class StudentHttpTests
         {
             var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
             var student = await db.Alumnos.SingleAsync(s => s.Email == "ANA@EXAMPLE.COM");
-            Assert.Equal(("Ana", "Smith"), (student.Nombre, student.Apellido));
+            Assert.Equal(("Ana", "Smith"), (student.FirstName, student.LastName));
             Assert.Equal(3, await db.Alumnos.CountAsync());
         }
         var allowed = await app.PutAsync(client, url, new { nombre = "New", apellido = "Name", email = " foreign@example.com " });
@@ -528,7 +528,7 @@ public sealed class StudentHttpTests
         Assert.Equal(await created.Content.ReadAsStringAsync(), await client.GetStringAsync(url));
         using var scope = app.Factory.Services.CreateScope();
         var student = await scope.ServiceProvider.GetRequiredService<StaticXDbContext>().Alumnos.SingleAsync();
-        Assert.Equal(("Ana", "Smith", "ANA@EXAMPLE.COM"), (student.Nombre, student.Apellido, student.Email));
+        Assert.Equal(("Ana", "Smith", "ANA@EXAMPLE.COM"), (student.FirstName, student.LastName, student.Email));
     }
 
     [Theory]
@@ -558,7 +558,7 @@ public sealed class StudentHttpTests
         Assert.True(response.Headers.CacheControl?.NoStore);
         using var readScope = app.Factory.Services.CreateScope();
         var actual = await readScope.ServiceProvider.GetRequiredService<StaticXDbContext>().Alumnos.SingleAsync();
-        Assert.Equal((id, gym, "Ana", "Smith", "ANA@EXAMPLE.COM"), (actual.Id, actual.GimnasioId, actual.Nombre, actual.Apellido, actual.Email));
+        Assert.Equal((id, gym, "Ana", "Smith", "ANA@EXAMPLE.COM"), (actual.Id, actual.GymId, actual.FirstName, actual.LastName, actual.Email));
     }
 
     [Fact]
@@ -618,7 +618,7 @@ public sealed class StudentHttpTests
         var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
         var persisted = await db.Alumnos.SingleAsync();
         Assert.Equal((initial.GetProperty("id").GetInt32(), gym, "Bea", "Jones", "BEA@EXAMPLE.COM", true),
-            (persisted.Id, persisted.GimnasioId, persisted.Nombre, persisted.Apellido, persisted.Email, persisted.Activo));
+            (persisted.Id, persisted.GymId, persisted.FirstName, persisted.LastName, persisted.Email, persisted.IsActive));
         Assert.Equal(1, await db.Users.CountAsync());
         Assert.Equal(accountBefore, JsonSerializer.Serialize(await db.Users.SingleAsync()));
         Assert.Empty(await db.ActivationInvitations.ToListAsync());
@@ -681,7 +681,7 @@ public sealed class StudentHttpTests
         using (var scope = app.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
-            var row = new Alumno { GimnasioId = gym, Nombre = "Ana", Apellido = "Smith", Email = "ANA@EXAMPLE.COM", Activo = initialActive };
+            var row = new Student { GymId = gym, FirstName = "Ana", LastName = "Smith", Email = "ANA@EXAMPLE.COM", IsActive = initialActive };
             db.Alumnos.Add(row);
             await db.SaveChangesAsync();
             id = row.Id;
@@ -694,7 +694,7 @@ public sealed class StudentHttpTests
         using var readScope = app.Factory.Services.CreateScope();
         var actual = await readScope.ServiceProvider.GetRequiredService<StaticXDbContext>().Alumnos.SingleAsync();
         Assert.Equal((id, gym, "Ana", "Smith", "ANA@EXAMPLE.COM", initialActive),
-            (actual.Id, actual.GimnasioId, actual.Nombre, actual.Apellido, actual.Email, actual.Activo));
+            (actual.Id, actual.GymId, actual.FirstName, actual.LastName, actual.Email, actual.IsActive));
     }
 
     [Theory]
@@ -815,7 +815,7 @@ public sealed class StudentHttpTests
         {
             using var scope = Factory.Services.CreateScope();
             var account = await scope.ServiceProvider.GetRequiredService<IAccountService>().CreateAsync(gym, new CreateAccountRequest("staff@example.com", "CorrectPassword1!"), role);
-            var users = scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
             var user = await users.FindByIdAsync(account.Id);
             Assert.NotNull(user);
             user.EmailConfirmed = true;

@@ -6,6 +6,7 @@ using BLL.Services.Interfaces;
 using DAL.Repositories.Interfaces;
 using DAL.Repositories.Implementation;
 using Static_X.API.Integrations;
+using Static_X.API.Integrations.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
@@ -41,7 +42,7 @@ if (!string.IsNullOrWhiteSpace(activationKeyRing))
         .PersistKeysToFileSystem(new DirectoryInfo(activationKeyRing));
 }
 builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme).AddIdentityCookies();
-builder.Services.AddIdentityCore<GymAccount>(options =>
+builder.Services.AddIdentityCore<IdentityAccount>(options =>
     {
         options.User.RequireUniqueEmail = false;
         options.SignIn.RequireConfirmedEmail = true;
@@ -53,7 +54,7 @@ builder.Services.AddIdentityCore<GymAccount>(options =>
     .AddSignInManager()
     .AddTokenProvider<PasswordResetTokenProvider>(PasswordResetTokenProvider.ProviderName);
 builder.Services.Configure<PasswordResetTokenProviderOptions>(_ => { });
-builder.Services.AddScoped<IUserClaimsPrincipalFactory<GymAccount>, GymClaimsPrincipalFactory>();
+builder.Services.AddScoped<IUserClaimsPrincipalFactory<IdentityAccount>, GymClaimsPrincipalFactory>();
 builder.Services.ConfigureApplicationCookie(options =>
 {
     options.Cookie.HttpOnly = true;
@@ -72,7 +73,7 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.Events.OnValidatePrincipal = async context =>
     {
         // Check every request, even at the exact cookie issuance time; the periodic validator alone delays revocation.
-        var signIn = context.HttpContext.RequestServices.GetRequiredService<SignInManager<GymAccount>>();
+        var signIn = context.HttpContext.RequestServices.GetRequiredService<SignInManager<IdentityAccount>>();
         if (await signIn.ValidateSecurityStampAsync(context.Principal) is null)
         {
             context.RejectPrincipal();
@@ -111,6 +112,11 @@ builder.Services.AddScoped<IDashboardRepository, DashboardRepository>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddScoped<IRoutineRepository, RoutineRepository>();
 builder.Services.AddScoped<IRoutineService, RoutineService>();
+builder.Services.AddScoped<IVideoLibraryRepository, VideoLibraryRepository>();
+builder.Services.AddScoped<IVideoLibraryService, VideoLibraryService>();
+builder.Services.Configure<VideoStorageOptions>(builder.Configuration.GetSection("VideoStorage"));
+builder.Services.AddScoped<IVideoObjectStore, S3VideoObjectStore>();
+builder.Services.AddHostedService<Static_X.API.Integrations.VideoLibrary.VideoCleanupWorker>();
 builder.Services.AddScoped<IPaymentRepository, PaymentRepository>();
 builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<IGymRepository, GymRepository>();

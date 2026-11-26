@@ -28,7 +28,7 @@ public sealed class GymService : IGymService
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("A gym name is required.", nameof(name));
 
-        var gym = await repository.AddAsync(new Gimnasio { Nombre = name.Trim() }, cancellationToken);
+        var gym = await repository.AddAsync(new Gym { Name = name.Trim() }, cancellationToken);
         return mapper.Map<GymResponse>(gym);
     }
 

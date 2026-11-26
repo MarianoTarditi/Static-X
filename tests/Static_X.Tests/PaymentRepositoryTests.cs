@@ -46,7 +46,7 @@ public sealed class PaymentRepositoryTests
         var page = await fixture.Repository.ListAsync(1, "Ana", status, new DateOnly(2026, 11, 15), 0, 1, default);
         Assert.Equal(count, page.TotalCount);
         Assert.Equal(count, page.Items.Count);
-        Assert.All(page.Items, item => Assert.Equal(1, item.Student.GimnasioId));
+        Assert.All(page.Items, item => Assert.Equal(1, item.Student.GymId));
         Assert.Empty((await fixture.Repository.ListAsync(1, "Foreign", null, new DateOnly(2026, 11, 15), 0, 100, default)).Items);
     }
 

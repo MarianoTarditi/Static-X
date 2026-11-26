@@ -183,7 +183,7 @@ public sealed class ServiceDtoTests
         var result = await new GymService(repository, TestMapper.Instance).AddAsync(request: new CreateGymRequest(" North "), cancellationToken: cancellation.Token);
         Assert.Equal((29, "Persisted gym"), (result.Id, result.Nombre));
         Assert.NotNull(repository.Added);
-        Assert.Equal((0, "North"), (repository.Added.Id, repository.Added.Nombre));
+        Assert.Equal((0, "North"), (repository.Added.Id, repository.Added.Name));
         Assert.Equal(cancellation.Token, repository.Token);
     }
 
@@ -224,14 +224,14 @@ public sealed class ServiceDtoTests
         public Task<global::DAL.Repositories.Models.GymPage> ListAsync(int offset, int pageSize, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<global::DAL.Repositories.Models.PendingAdministratorPage?> ListPendingAdministratorsAsync(int gymId, int offset, int pageSize, CancellationToken cancellationToken) => throw new NotSupportedException();
 
-        public Gimnasio? Added { get; private set; }
+        public Gym? Added { get; private set; }
         public CancellationToken Token { get; private set; }
 
-        public Task<Gimnasio> AddAsync(Gimnasio gym, CancellationToken cancellationToken)
+        public Task<Gym> AddAsync(Gym gym, CancellationToken cancellationToken)
         {
             Added = gym;
             Token = cancellationToken;
-            return Task.FromResult(new Gimnasio { Id = 29, Nombre = "Persisted gym" });
+            return Task.FromResult(new Gym { Id = 29, Name = "Persisted gym" });
         }
     }
 

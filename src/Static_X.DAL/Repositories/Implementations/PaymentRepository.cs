@@ -19,7 +19,7 @@ public sealed class PaymentRepository : IPaymentRepository
         var latest = context.Payments.Where(p => p.GymId == gymId && p.VoidedAt == null &&
             !context.Payments.Any(next => next.GymId == gymId && next.StudentId == p.StudentId && next.VoidedAt == null && next.Sequence > p.Sequence));
         var rows = from student in context.Alumnos
-                   where student.GimnasioId == gymId && student.Activo
+                   where student.GymId == gymId && student.IsActive
                    join payment in latest on student.Id equals payment.StudentId into payments
                    from payment in payments.DefaultIfEmpty()
                    select new { End = (DateOnly?)payment.CoverageEndExclusive };
@@ -38,7 +38,7 @@ public sealed class PaymentRepository : IPaymentRepository
     {
         var rows = context.Payments.Where(p => p.GymId == gymId && p.VoidedAt == null &&
             p.CoverageStart <= today && p.CoverageEndExclusive > today && p.CoverageEndExclusive < nextMonth &&
-            context.Alumnos.Any(s => s.GimnasioId == gymId && s.Id == p.StudentId && s.Activo) &&
+            context.Alumnos.Any(s => s.GymId == gymId && s.Id == p.StudentId && s.IsActive) &&
             !context.Payments.Any(next => next.GymId == gymId && next.StudentId == p.StudentId && next.VoidedAt == null && next.Sequence > p.Sequence))
             .Select(p => new
             {
@@ -82,7 +82,7 @@ public sealed class PaymentRepository : IPaymentRepository
     /// <summary>Obtiene la ficha, el último pago vigente y la tarifa aplicable a la fecha solicitada.</summary>
     public async Task<PaymentSnapshot?> SnapshotAsync(int gymId, int studentId, DateOnly paidOn, CancellationToken cancellationToken)
     {
-        var student = await context.Alumnos.AsNoTracking().SingleOrDefaultAsync(s => s.GimnasioId == gymId && s.Id == studentId, cancellationToken);
+        var student = await context.Alumnos.AsNoTracking().SingleOrDefaultAsync(s => s.GymId == gymId && s.Id == studentId, cancellationToken);
         if (student is null) return null;
         var last = await context.Payments.AsNoTracking().Where(p => p.GymId == gymId && p.StudentId == studentId && p.VoidedAt == null)
             .OrderByDescending(p => p.Sequence).FirstOrDefaultAsync(cancellationToken);
@@ -92,8 +92,8 @@ public sealed class PaymentRepository : IPaymentRepository
     }
 
     /// <summary>Busca exclusivamente el vínculo explícito entre cuenta y ficha del mismo gimnasio.</summary>
-    public Task<Alumno?> FindOwnAsync(int gymId, string accountId, CancellationToken cancellationToken) =>
-        context.Alumnos.AsNoTracking().SingleOrDefaultAsync(s => s.GimnasioId == gymId && s.AccountId == accountId, cancellationToken);
+    public Task<Student?> FindOwnAsync(int gymId, string accountId, CancellationToken cancellationToken) =>
+        context.Alumnos.AsNoTracking().SingleOrDefaultAsync(s => s.GymId == gymId && s.AccountId == accountId, cancellationToken);
 
     /// <summary>Busca el resultado original de una clave idempotente incluso después de su anulación.</summary>
     public Task<Payment?> FindReplayAsync(int gymId, string key, CancellationToken cancellationToken) =>
@@ -128,7 +128,7 @@ public sealed class PaymentRepository : IPaymentRepository
             return replay;
         }
         var snapshot = await SnapshotAsync(payment.GymId, payment.StudentId, payment.PaidOn, cancellationToken);
-        if (snapshot is null || !snapshot.Student.Activo || snapshot.Student.PaymentRevision != revision ||
+        if (snapshot is null || !snapshot.Student.IsActive || snapshot.Student.PaymentRevision != revision ||
             snapshot.Price?.Id != payment.PriceId || snapshot.Price.AmountCents != payment.AmountCents ||
             snapshot.LastPayment?.Id != payment.PreviousPaymentId || payment.PaidOn > today ||
             (snapshot.LastPayment is not null && payment.PaidOn < snapshot.LastPayment.PaidOn) ||
@@ -138,7 +138,7 @@ public sealed class PaymentRepository : IPaymentRepository
             payment.CoverageStart != (snapshot.LastPayment is not null && snapshot.LastPayment.CoverageEndExclusive >= payment.PaidOn ? snapshot.LastPayment.CoverageStart : payment.PaidOn) ||
             string.IsNullOrWhiteSpace(payment.ActorId) || payment.IdempotencyKey.Length is < 1 or > 128 || payment.RequestFingerprint.Length != 64)
             throw new InvalidOperationException("Payment state changed. Request a new preview.");
-        var changed = await context.Alumnos.Where(s => s.GimnasioId == payment.GymId && s.Id == payment.StudentId && s.Activo && s.PaymentRevision == revision)
+        var changed = await context.Alumnos.Where(s => s.GymId == payment.GymId && s.Id == payment.StudentId && s.IsActive && s.PaymentRevision == revision)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.PaymentRevision, revision + 1), cancellationToken);
         if (changed != 1) throw new InvalidOperationException("Payment state changed.");
         context.Payments.Add(payment);
@@ -159,7 +159,7 @@ public sealed class PaymentRepository : IPaymentRepository
         if (await context.Payments.Where(p => p.GymId == gymId && p.StudentId == studentId && p.Id == paymentId && p.VoidedAt == null)
             .ExecuteUpdateAsync(s => s.SetProperty(p => p.VoidedAt, now).SetProperty(p => p.VoidedBy, actorId).SetProperty(p => p.VoidReason, reason), cancellationToken) != 1)
             throw new InvalidOperationException("Payment state changed.");
-        await context.Alumnos.Where(s => s.GimnasioId == gymId && s.Id == studentId)
+        await context.Alumnos.Where(s => s.GymId == gymId && s.Id == studentId)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.PaymentRevision, x => x.PaymentRevision + 1), cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return true;
@@ -177,8 +177,8 @@ public sealed class PaymentRepository : IPaymentRepository
     /// <summary>Proyecta y pagina fichas con su último pago y filtra su cobertura sin consultas por fila.</summary>
     public async Task<PaymentStudentPage> ListAsync(int gymId, string? search, PaymentStatus? status, DateOnly today, int skip, int take, CancellationToken cancellationToken)
     {
-        var query = context.Alumnos.AsNoTracking().Where(s => s.GimnasioId == gymId);
-        if (search is not null) query = query.Where(s => (s.Nombre + " " + s.Apellido).Contains(search));
+        var query = context.Alumnos.AsNoTracking().Where(s => s.GymId == gymId);
+        if (search is not null) query = query.Where(s => (s.FirstName + " " + s.LastName).Contains(search));
         var rows = query.Select(s => new
         {
             Student = s,
@@ -190,7 +190,7 @@ public sealed class PaymentRepository : IPaymentRepository
         if (status == PaymentStatus.ExpiringSoon) rows = rows.Where(r => r.Last != null && r.Last.CoverageEndExclusive > today && r.Last.CoverageEndExclusive <= soonEnd);
         if (status == PaymentStatus.Current) rows = rows.Where(r => r.Last != null && r.Last.CoverageEndExclusive > soonEnd);
         var count = await rows.CountAsync(cancellationToken);
-        var page = await rows.OrderBy(r => r.Student.Apellido).ThenBy(r => r.Student.Nombre).ThenBy(r => r.Student.Id).Skip(skip).Take(take).ToArrayAsync(cancellationToken);
+        var page = await rows.OrderBy(r => r.Student.LastName).ThenBy(r => r.Student.FirstName).ThenBy(r => r.Student.Id).Skip(skip).Take(take).ToArrayAsync(cancellationToken);
         var price = await context.GymPassPrices.AsNoTracking().Where(p => p.GymId == gymId && p.EffectiveFrom <= today).OrderByDescending(p => p.EffectiveFrom).FirstOrDefaultAsync(cancellationToken);
         return new PaymentStudentPage(page.Select(r => new PaymentSnapshot(r.Student, r.Last, price)).ToArray(), count);
     }

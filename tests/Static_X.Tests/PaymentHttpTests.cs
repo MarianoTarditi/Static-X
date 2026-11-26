@@ -270,8 +270,8 @@ public sealed class PaymentHttpTests
         await using var app = await PaymentHttpApp.CreateAsync();
         using var scope = app.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
-        db.Alumnos.AddRange(new Alumno { Id = 3, GimnasioId = 1, Nombre = "Bea", Apellido = "Before", Email = "BEA@EXAMPLE.INVALID" },
-            new Alumno { Id = 4, GimnasioId = 1, Nombre = "Zoe", Apellido = "After", Email = "ZOE@EXAMPLE.INVALID" });
+        db.Alumnos.AddRange(new Student { Id = 3, GymId = 1, FirstName = "Bea", LastName = "Before", Email = "BEA@EXAMPLE.INVALID" },
+            new Student { Id = 4, GymId = 1, FirstName = "Zoe", LastName = "After", Email = "ZOE@EXAMPLE.INVALID" });
         await db.SaveChangesAsync(); db.ChangeTracker.Clear(); app.Fault.Commands.Clear();
         var page = await scope.ServiceProvider.GetRequiredService<IPaymentService>().ListAsync(1, AccountRole.Trainer,
             new PaymentListRequest { Page = 2, PageSize = 1 }, default);
@@ -355,12 +355,12 @@ internal sealed class PaymentHttpApp : IAsyncDisposable
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
         await db.Database.EnsureCreatedAsync();
-        db.Gimnasios.AddRange(new Gimnasio { Id = 1, Nombre = "First" }, new Gimnasio { Id = 2, Nombre = "Other" });
+        db.Gimnasios.AddRange(new Gym { Id = 1, Name = "First" }, new Gym { Id = 2, Name = "Other" });
         await db.SaveChangesAsync();
-        var users = scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
         foreach (var role in new[] { AccountRole.GymAdmin, AccountRole.Trainer, AccountRole.Student, AccountRole.SuperAdmin })
         {
-            var user = new GymAccount
+            var user = new IdentityAccount
             {
                 Id = role.ToString(),
                 GymId = role == AccountRole.SuperAdmin ? null : 1,
@@ -371,8 +371,8 @@ internal sealed class PaymentHttpApp : IAsyncDisposable
             };
             Assert.True((await users.CreateAsync(user, "CorrectPassword1!")).Succeeded);
         }
-        db.Alumnos.AddRange(new Alumno { Id = 1, GimnasioId = 1, AccountId = "Student", Nombre = "Ana", Apellido = "Own", Email = "STUDENT@EXAMPLE.INVALID" },
-            new Alumno { Id = 2, GimnasioId = 2, Nombre = "Ana", Apellido = "Foreign", Email = "STUDENT@EXAMPLE.INVALID" });
+        db.Alumnos.AddRange(new Student { Id = 1, GymId = 1, AccountId = "Student", FirstName = "Ana", LastName = "Own", Email = "STUDENT@EXAMPLE.INVALID" },
+            new Student { Id = 2, GymId = 2, FirstName = "Ana", LastName = "Foreign", Email = "STUDENT@EXAMPLE.INVALID" });
         await db.SaveChangesAsync();
         await scope.ServiceProvider.GetRequiredService<IPaymentService>().SetPriceAsync(1, AccountRole.GymAdmin, "GymAdmin", new SetPassPriceRequest { AmountCents = 100099, InitialEffectiveFrom = new DateOnly(2026, 11, 1) }, default);
         return new PaymentHttpApp(connection, factory, clock, fault);

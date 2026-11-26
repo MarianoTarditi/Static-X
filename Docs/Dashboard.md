@@ -26,9 +26,9 @@ The endpoint uses the existing administrative `Cache-Control: no-store` conventi
 
 ## Counting and ownership
 
-- `total` counts all persisted `Alumno` fichas in the authenticated gym.
-- `active` counts `Alumno.Activo == true`; `inactive` counts `false`.
-- `activeWithoutAccount` counts same-session-gym fichas with `Alumno.Activo == true` and `Alumno.AccountId == null`, irrespective of contact email. Linked accounts are excluded even when activation or email confirmation is pending. This indicates active fichas that could still be invited to use the app.
+- `total` counts all persisted `Student` fichas in the authenticated gym.
+- `active` counts `Student.IsActive == true`; `inactive` counts `false`.
+- `activeWithoutAccount` counts same-session-gym fichas with `Student.IsActive == true` and `Student.AccountId == null`, irrespective of contact email. Linked accounts are excluded even when activation or email confirmation is pending. This indicates active fichas that could still be invited to use the app.
 - `total`, `active`, and `inactive` do not depend on linked accounts. No count depends on email matching, account enablement, payments, or routine publication. No names, emails, identifiers, or other personal fields are returned.
 - API delegates to a dedicated BLL dashboard read service, which independently validates the trusted gym and actor role. DAL performs one filtered, server-side aggregate query and returns an immutable projection. BLL maps that result through `DashboardProfile`, discovered by the existing BLL-only AutoMapper registration.
 - No schema change, migration, backfill, new package, or external service is required.

@@ -6,10 +6,10 @@ using Microsoft.Extensions.Options;
 namespace Static_X.API.Auth;
 
 public sealed class GymClaimsPrincipalFactory(
-    UserManager<GymAccount> users, IOptions<IdentityOptions> options)
-    : UserClaimsPrincipalFactory<GymAccount>(users, options)
+    UserManager<IdentityAccount> users, IOptions<IdentityOptions> options)
+    : UserClaimsPrincipalFactory<IdentityAccount>(users, options)
 {
-    protected override async Task<ClaimsIdentity> GenerateClaimsAsync(GymAccount user)
+    protected override async Task<ClaimsIdentity> GenerateClaimsAsync(IdentityAccount user)
     {
         var identity = await base.GenerateClaimsAsync(user);
         if (user.GymId is int gymId)

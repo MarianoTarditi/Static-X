@@ -77,7 +77,7 @@ Rollback is guarded: it refuses while any tenant invitation audit, explicit link
 
 ### Historical active-state migration
 
-`20261027023459_AddStudentActiveState` is the sixth migration. It adds `Alumnos.Activo bit NOT NULL DEFAULT 1`, making existing rows active without dropping/recreating the table. New entities and repository-created fichas also start active. Down removes only the new column (and loses state history); it does not delete fichas.
+`20261027023459_AddStudentActiveState` is the sixth migration. It adds `Alumnos.Activo bit NOT NULL DEFAULT 1`, making existing rows active without dropping/recreating the table. New `Student` entities and repository-created fichas also start active through `Student.IsActive`. The CLR properties `GymId`, `FirstName`, `LastName`, and `IsActive` retain the physical columns `GimnasioId`, `Nombre`, `Apellido`, and `Activo`; public DTO/JSON names remain unchanged. Down removes only the new column (and loses state history); it does not delete fichas.
 
 The five historical Up/Down bodies remain unchanged. The SQL Server model and snapshot are checked offline; SQLite tests check actual persistence/defaults and concurrency behavior. Unlinked ficha-state writes mark only Activo modified; linked writes additionally synchronize the account as described above. Repeated calls still issue a write so deletion after retrieval produces a concurrency failure rather than false success. No RowVersion is introduced.
 

@@ -8,7 +8,7 @@ public interface IPaymentRepository
     Task<PaymentSummary> SummaryAsync(int gymId, DateOnly today, DateOnly soonEnd, DateOnly nextMonth, CancellationToken cancellationToken);
     Task<IReadOnlyList<PaymentCollection>> CollectionsAsync(int gymId, DateOnly from, DateOnly to, CancellationToken cancellationToken);
     Task<PaymentSnapshot?> SnapshotAsync(int gymId, int studentId, DateOnly paidOn, CancellationToken cancellationToken);
-    Task<Alumno?> FindOwnAsync(int gymId, string accountId, CancellationToken cancellationToken);
+    Task<Student?> FindOwnAsync(int gymId, string accountId, CancellationToken cancellationToken);
     Task<Payment?> FindReplayAsync(int gymId, string key, CancellationToken cancellationToken);
     Task<Payment> RegisterAsync(Payment payment, long revision, DateOnly today, CancellationToken cancellationToken);
     Task<bool> VoidAsync(int gymId, int studentId, long paymentId, string actorId, string reason, DateTimeOffset now, CancellationToken cancellationToken);

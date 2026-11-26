@@ -41,7 +41,7 @@ public sealed class DashboardHttpTests
             var db = seedScope.ServiceProvider.GetRequiredService<StaticXDbContext>();
             var pending = await db.Users.SingleAsync(account => account.Email == pendingEmail);
             pending.EmailConfirmed = false;
-            var activeFichas = await db.Alumnos.Where(student => student.GimnasioId == gym && student.Activo)
+            var activeFichas = await db.Alumnos.Where(student => student.GymId == gym && student.IsActive)
                 .OrderBy(student => student.Id).ToArrayAsync();
             activeFichas[0].AccountId = pending.Id;
             activeFichas[1].Email = pendingEmail;
@@ -121,7 +121,7 @@ public sealed class DashboardHttpTests
         using var admin = await app.LoginAsync(gym, AccountRole.GymAdmin);
         using (var scope = app.Factory.Services.CreateScope())
         {
-            var users = scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
             var user = await users.Users.SingleAsync();
             Assert.True((await users.UpdateSecurityStampAsync(user)).Succeeded);
         }
@@ -145,8 +145,8 @@ public sealed class DashboardHttpTests
         var gym = await app.GymAsync();
         await app.CreateAccountAsync(gym, AccountRole.GymAdmin);
         using var scope = app.Factory.Services.CreateScope();
-        var user = await scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>().Users.SingleAsync();
-        var principal = await scope.ServiceProvider.GetRequiredService<IUserClaimsPrincipalFactory<GymAccount>>().CreateAsync(user);
+        var user = await scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>().Users.SingleAsync();
+        var principal = await scope.ServiceProvider.GetRequiredService<IUserClaimsPrincipalFactory<IdentityAccount>>().CreateAsync(user);
         var identity = Assert.IsType<ClaimsIdentity>(principal.Identity);
         foreach (var existing in identity.FindAll("gym_id").ToArray()) identity.RemoveClaim(existing);
         if (claim is not null) identity.AddClaim(new Claim("gym_id", claim));
@@ -282,7 +282,7 @@ public sealed class DashboardHttpTests
         {
             using var scope = Factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
-            var gym = new Gimnasio { Nombre = "Dashboard test gym" };
+            var gym = new Gym { Name = "Dashboard test gym" };
             db.Gimnasios.Add(gym);
             await db.SaveChangesAsync();
             return gym.Id;
@@ -293,7 +293,7 @@ public sealed class DashboardHttpTests
             using var scope = Factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
             foreach (var active in states)
-                db.Alumnos.Add(new Alumno { GimnasioId = gym, Activo = active, Nombre = "Private", Apellido = "Student",
+                db.Alumnos.Add(new Student { GymId = gym, IsActive = active, FirstName = "Private", LastName = "Student",
                     Email = Guid.NewGuid().ToString("N") + "@example.invalid" });
             await db.SaveChangesAsync();
         }
@@ -301,9 +301,9 @@ public sealed class DashboardHttpTests
         public async Task<string> CreateAccountAsync(int? gym, AccountRole role)
         {
             using var scope = Factory.Services.CreateScope();
-            var users = scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
             var email = Guid.NewGuid().ToString("N") + "@example.invalid";
-            var user = new GymAccount { GymId = gym, Role = role, UserName = email, Email = email, EmailConfirmed = true, IsEnabled = true };
+            var user = new IdentityAccount { GymId = gym, Role = role, UserName = email, Email = email, EmailConfirmed = true, IsEnabled = true };
             Assert.True((await users.CreateAsync(user, "CorrectPassword1!")).Succeeded);
             return email;
         }

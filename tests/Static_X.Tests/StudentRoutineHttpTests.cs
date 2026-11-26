@@ -124,7 +124,7 @@ public sealed class StudentRoutineHttpTests
         var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
         Assert.Equal(2, await db.Alumnos.CountAsync());
         var profile = await db.Alumnos.SingleAsync(s => s.Id == 1);
-        Assert.Equal("Own", profile.Apellido);
+        Assert.Equal("Own", profile.LastName);
         Assert.Equal("Student", profile.AccountId);
     }
 
@@ -256,7 +256,7 @@ public sealed class StudentRoutineHttpTests
         using (var scope = app.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
-            db.Alumnos.Add(new Alumno { Id = 3, GimnasioId = 1, Nombre = "Other", Apellido = "Profile", Email = "other@example.invalid" });
+            db.Alumnos.Add(new Student { Id = 3, GymId = 1, FirstName = "Other", LastName = "Profile", Email = "other@example.invalid" });
             await db.SaveChangesAsync();
         }
         Assert.Equal(HttpStatusCode.Created, (await PutAsync(trainer, "/api/students/3/routine", Publication(null, "Other"))).StatusCode);

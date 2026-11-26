@@ -26,22 +26,22 @@ public sealed class TenantInvitationSliceTests
         await connection.OpenAsync();
         await using var db = new StaticXDbContext(new DbContextOptionsBuilder<StaticXDbContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var gym = new Gimnasio { Nombre = "Isolated" };
+        var gym = new Gym { Name = "Isolated" };
         db.Gimnasios.Add(gym);
         await db.SaveChangesAsync();
-        var account = new GymAccount { Id = "linked", UserName = "linked", Email = "login@example.invalid", NormalizedEmail = "LOGIN@EXAMPLE.INVALID", GymId = gym.Id, Role = AccountRole.Student, SecurityStamp = "original" };
+        var account = new IdentityAccount { Id = "linked", UserName = "linked", Email = "login@example.invalid", NormalizedEmail = "LOGIN@EXAMPLE.INVALID", GymId = gym.Id, Role = AccountRole.Student, SecurityStamp = "original" };
         db.Users.Add(account);
-        var student = new Alumno { GimnasioId = gym.Id, Nombre = "Selected", Apellido = "Student", Email = "contact@example.invalid" };
-        var link = typeof(Alumno).GetProperty("AccountId");
+        var student = new Student { GymId = gym.Id, FirstName = "Selected", LastName = "Student", Email = "contact@example.invalid" };
+        var link = typeof(Student).GetProperty("AccountId");
         Assert.NotNull(link);
         link.SetValue(student, account.Id);
         db.Alumnos.Add(student);
         await db.SaveChangesAsync();
 
-        Assert.False((await new StudentRepository(db).SetActiveAsync(gym.Id, student.Id, false, default))!.Activo);
+        Assert.False((await new StudentRepository(db).SetActiveAsync(gym.Id, student.Id, false, default))!.IsActive);
         db.ChangeTracker.Clear();
         var persisted = await db.Users.SingleAsync();
-        var enabled = typeof(GymAccount).GetProperty("IsEnabled");
+        var enabled = typeof(IdentityAccount).GetProperty("IsEnabled");
         Assert.NotNull(enabled);
         Assert.Equal(false, enabled.GetValue(persisted));
         Assert.NotEqual("original", persisted.SecurityStamp);
@@ -106,15 +106,15 @@ public sealed class TenantInvitationSliceTests
         var options = new DbContextOptionsBuilder<StaticXDbContext>().UseSqlite(connection).AddInterceptors(interceptor).Options;
         await using var db = new StaticXDbContext(options);
         await db.Database.EnsureCreatedAsync();
-        var first = new Gimnasio { Nombre = "First" };
-        var other = new Gimnasio { Nombre = "Other" };
+        var first = new Gym { Name = "First" };
+        var other = new Gym { Name = "Other" };
         db.Gimnasios.AddRange(first, other);
         await db.SaveChangesAsync();
-        var account = new GymAccount { Id = "target", UserName = "target", GymId = scenario == "foreign-gym" ? other.Id : first.Id,
+        var account = new IdentityAccount { Id = "target", UserName = "target", GymId = scenario == "foreign-gym" ? other.Id : first.Id,
             Role = scenario == "wrong-role" ? AccountRole.Trainer : AccountRole.Student, Email = "target@example.invalid", NormalizedEmail = "TARGET@EXAMPLE.INVALID",
             SecurityStamp = "original-stamp", ConcurrencyStamp = "original-concurrency" };
         db.Users.Add(account);
-        var student = new Alumno { GimnasioId = first.Id, AccountId = account.Id, Nombre = "Selected", Apellido = "Student", Email = "contact@example.invalid" };
+        var student = new Student { GymId = first.Id, AccountId = account.Id, FirstName = "Selected", LastName = "Student", Email = "contact@example.invalid" };
         db.Alumnos.Add(student);
         await db.SaveChangesAsync();
         interceptor.Fail = scenario == "commit-failure";
@@ -124,7 +124,7 @@ public sealed class TenantInvitationSliceTests
         Assert.True(persisted.IsEnabled);
         Assert.False(persisted.StudentAccessSuspended);
         Assert.Equal(("original-stamp", "original-concurrency"), (persisted.SecurityStamp, persisted.ConcurrencyStamp));
-        Assert.True((await db.Alumnos.SingleAsync()).Activo);
+        Assert.True((await db.Alumnos.SingleAsync()).IsActive);
     }
 
     [Theory]
@@ -137,20 +137,20 @@ public sealed class TenantInvitationSliceTests
         await connection.OpenAsync();
         await using var db = new StaticXDbContext(new DbContextOptionsBuilder<StaticXDbContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var gym = new Gimnasio { Nombre = "Isolated" };
+        var gym = new Gym { Name = "Isolated" };
         db.Gimnasios.Add(gym);
         await db.SaveChangesAsync();
         var until = DateTimeOffset.UtcNow.AddDays(1);
-        var account = new GymAccount { Id = "disabled", UserName = "disabled", GymId = gym.Id, Role = AccountRole.Student,
+        var account = new IdentityAccount { Id = "disabled", UserName = "disabled", GymId = gym.Id, Role = AccountRole.Student,
             Email = "same@example.invalid", NormalizedEmail = "SAME@EXAMPLE.INVALID", IsEnabled = enabled, SecurityStamp = "do-not-restore",
             LockoutEnd = until, AccessFailedCount = 4 };
         db.Users.Add(account);
-        var student = new Alumno { GimnasioId = gym.Id, AccountId = linked ? account.Id : null, Nombre = "Independent", Apellido = "Ficha", Email = "same@example.invalid" };
+        var student = new Student { GymId = gym.Id, AccountId = linked ? account.Id : null, FirstName = "Independent", LastName = "Ficha", Email = "same@example.invalid" };
         db.Alumnos.Add(student);
         await db.SaveChangesAsync();
         var repository = new StudentRepository(db);
-        Assert.False((await repository.SetActiveAsync(gym.Id, student.Id, false, default))!.Activo);
-        Assert.True((await repository.SetActiveAsync(gym.Id, student.Id, true, default))!.Activo);
+        Assert.False((await repository.SetActiveAsync(gym.Id, student.Id, false, default))!.IsActive);
+        Assert.True((await repository.SetActiveAsync(gym.Id, student.Id, true, default))!.IsActive);
         db.ChangeTracker.Clear();
         var persisted = Assert.Single(await db.Users.ToListAsync());
         Assert.Equal(enabled, persisted.IsEnabled);
@@ -169,17 +169,17 @@ public sealed class TenantInvitationSliceTests
         await connection.OpenAsync();
         await using var db = new StaticXDbContext(new DbContextOptionsBuilder<StaticXDbContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var gym = new Gimnasio { Nombre = "Isolated" };
+        var gym = new Gym { Name = "Isolated" };
         db.Gimnasios.Add(gym);
         await db.SaveChangesAsync();
-        var user = new GymAccount { Id = "one", UserName = "one", GymId = gym.Id, Role = AccountRole.Student, Email = "one@example.invalid", NormalizedEmail = "ONE@EXAMPLE.INVALID" };
+        var user = new IdentityAccount { Id = "one", UserName = "one", GymId = gym.Id, Role = AccountRole.Student, Email = "one@example.invalid", NormalizedEmail = "ONE@EXAMPLE.INVALID" };
         db.Users.Add(user);
-        db.Alumnos.Add(new Alumno { GimnasioId = gym.Id, AccountId = user.Id, Nombre = "First", Apellido = "Student", Email = "first@example.invalid" });
+        db.Alumnos.Add(new Student { GymId = gym.Id, AccountId = user.Id, FirstName = "First", LastName = "Student", Email = "first@example.invalid" });
         await db.SaveChangesAsync();
-        db.Alumnos.Add(new Alumno { GimnasioId = gym.Id, AccountId = user.Id, Nombre = "Second", Apellido = "Student", Email = "second@example.invalid" });
+        db.Alumnos.Add(new Student { GymId = gym.Id, AccountId = user.Id, FirstName = "Second", LastName = "Student", Email = "second@example.invalid" });
         await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
         db.ChangeTracker.Clear();
-        db.Alumnos.Add(new Alumno { GimnasioId = gym.Id, AccountId = "missing", Nombre = "Dangling", Apellido = "Student", Email = "dangling@example.invalid" });
+        db.Alumnos.Add(new Student { GymId = gym.Id, AccountId = "missing", FirstName = "Dangling", LastName = "Student", Email = "dangling@example.invalid" });
         await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
         db.ChangeTracker.Clear();
         db.Users.Remove(await db.Users.SingleAsync());
@@ -210,8 +210,8 @@ public sealed class TenantInvitationSliceTests
         Assert.True(down.IndexOf("THROW 51001", StringComparison.Ordinal) < down.IndexOf("DROP TABLE", StringComparison.Ordinal));
         Assert.Contains("[IsEnabled] = 0", down);
         Assert.False(db.Database.HasPendingModelChanges());
-        Assert.True(db.Model.FindEntityType(typeof(GymAccount))!.FindProperty(nameof(GymAccount.GymId))!.IsNullable);
-        Assert.True(db.Model.FindEntityType(typeof(Alumno))!.FindProperty(nameof(Alumno.AccountId))!.IsConcurrencyToken);
+        Assert.True(db.Model.FindEntityType(typeof(IdentityAccount))!.FindProperty(nameof(IdentityAccount.GymId))!.IsNullable);
+        Assert.True(db.Model.FindEntityType(typeof(Student))!.FindProperty(nameof(Student.AccountId))!.IsConcurrencyToken);
     }
 
     [Fact]
@@ -223,10 +223,10 @@ public sealed class TenantInvitationSliceTests
         await using (var seed = new StaticXDbContext(options))
         {
             await seed.Database.EnsureCreatedAsync();
-            seed.Gimnasios.Add(new Gimnasio { Id = 1, Nombre = "Isolated" });
-            seed.Users.Add(new GymAccount { Id = "new-link", UserName = "new-link", GymId = 1, Role = AccountRole.Student,
+            seed.Gimnasios.Add(new Gym { Id = 1, Name = "Isolated" });
+            seed.Users.Add(new IdentityAccount { Id = "new-link", UserName = "new-link", GymId = 1, Role = AccountRole.Student,
                 Email = "login@example.invalid", NormalizedEmail = "LOGIN@EXAMPLE.INVALID", SecurityStamp = "original" });
-            seed.Alumnos.Add(new Alumno { Id = 1, GimnasioId = 1, Nombre = "Selected", Apellido = "Student", Email = "contact@example.invalid" });
+            seed.Alumnos.Add(new Student { Id = 1, GymId = 1, FirstName = "Selected", LastName = "Student", Email = "contact@example.invalid" });
             await seed.SaveChangesAsync();
         }
         await using var db = new StaticXDbContext(new DbContextOptionsBuilder<StaticXDbContext>().UseSqlite(connection)
@@ -235,7 +235,7 @@ public sealed class TenantInvitationSliceTests
         db.ChangeTracker.Clear();
         var student = await db.Alumnos.SingleAsync();
         Assert.Equal("new-link", student.AccountId);
-        Assert.True(student.Activo);
+        Assert.True(student.IsActive);
         var account = await db.Users.SingleAsync();
         Assert.True(account.IsEnabled);
         Assert.False(account.StudentAccessSuspended);
@@ -248,7 +248,7 @@ public sealed class TenantInvitationSliceTests
             InterceptionResult<int> result, CancellationToken cancellationToken = default)
         {
             // This commits independently before the legacy unlinked SaveChanges starts its own write.
-            Assert.Equal(1, await eventData.Context!.Set<Alumno>().Where(s => s.Id == 1 && s.AccountId == null)
+            Assert.Equal(1, await eventData.Context!.Set<Student>().Where(s => s.Id == 1 && s.AccountId == null)
                 .ExecuteUpdateAsync(s => s.SetProperty(s => s.AccountId, "new-link"), cancellationToken));
             return result;
         }

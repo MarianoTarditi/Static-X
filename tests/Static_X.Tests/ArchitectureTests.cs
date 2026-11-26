@@ -29,6 +29,115 @@ namespace Static_X.Tests;
 
 public class ArchitectureTests
 {
+    [Fact]
+    public void RenamedEntitySurface_UsesRequestedClrNamesWithoutObsoleteAliases()
+    {
+        var assembly = typeof(Account).Assembly;
+        var expected = new Dictionary<string, string[]>
+        {
+            ["Entity.Student"] = ["GymId", "FirstName", "LastName", "IsActive"],
+            ["Entity.Gym"] = ["Name"],
+            ["DAL.IdentityAccount"] = ["GymId", "Role", "IsEnabled"],
+            ["DAL.GymProvisioningRecord"] = ["IdempotencyKey", "InitialAdminAccountId"],
+            ["DAL.Repositories.Interfaces.ActivationDelivery"] = ["LeaseId", "RecipientEmail", "OutboxEntryId"]
+        };
+        foreach (var (name, properties) in expected)
+        {
+            var type = assembly.GetType(name);
+            Assert.NotNull(type);
+            foreach (var property in properties) Assert.NotNull(type.GetProperty(property));
+        }
+        foreach (var name in new[] { "Entity.Alumno", "Entity.Gimnasio", "DAL.GymAccount", "DAL.ProvisioningRequest" })
+            Assert.Null(assembly.GetType(name));
+        Assert.All(new[] { "GimnasioId", "Nombre", "Apellido", "Activo" }, name => Assert.Null(typeof(Student).GetProperty(name)));
+        Assert.Null(typeof(Gym).GetProperty("Nombre"));
+        Assert.All(new[] { "Key", "AccountId" }, name => Assert.Null(typeof(GymProvisioningRecord).GetProperty(name)));
+        Assert.All(new[] { "LeaseOwner", "Email", "JobId" }, name => Assert.Null(typeof(ActivationDelivery).GetProperty(name)));
+        Assert.Equal(new[] { "OutboxEntryId", "InvitationId", "LeaseId", "RecipientEmail", "ProtectedToken" },
+            typeof(ActivationDelivery).GetConstructors().Single().GetParameters().Select(parameter => parameter.Name));
+        Assert.Equal(new[] { 1, 2, 3, 4 }, Enum.GetValues<AccountRole>().Select(role => (int)role));
+    }
+
+    [Fact]
+    public void RenamedProperties_RetainLegacyColumnsKeysAndIndexes()
+    {
+        using var context = new StaticXDbContext(new DbContextOptionsBuilder<StaticXDbContext>()
+            .UseSqlServer("Server=unused;Database=unused;Integrated Security=true").Options);
+        var model = context.GetService<Microsoft.EntityFrameworkCore.Metadata.IDesignTimeModel>().Model;
+        var student = model.FindEntityType(typeof(Student))!;
+        Assert.Equal("Alumnos", student.GetTableName());
+        foreach (var (property, column) in new[] { ("GymId", "GimnasioId"), ("FirstName", "Nombre"), ("LastName", "Apellido"), ("IsActive", "Activo") })
+            Assert.Equal(column, student.FindProperty(property)!.GetColumnName());
+        Assert.Equal("AK_Alumnos_GimnasioId_Id", student.GetKeys().Single(key => key.Properties.Select(p => p.Name).SequenceEqual(new[] { "GymId", "Id" })).GetName());
+        Assert.Equal("IX_Alumnos_GimnasioId_Email", student.GetIndexes().Single(index => index.Properties.Select(p => p.Name).SequenceEqual(new[] { "GymId", "Email" })).GetDatabaseName());
+        Assert.Equal("FK_Alumnos_Gimnasios_GimnasioId", student.GetForeignKeys().Single(key => key.PrincipalEntityType.ClrType == typeof(Gym)).GetConstraintName());
+        var gym = model.FindEntityType(typeof(Gym))!;
+        Assert.Equal("Gimnasios", gym.GetTableName());
+        Assert.Equal("Nombre", gym.FindProperty(nameof(Gym.Name))!.GetColumnName());
+        var request = model.FindEntityType(typeof(GymProvisioningRecord))!;
+        Assert.Equal("ProvisioningRequests", request.GetTableName());
+        Assert.Equal("Key", request.FindProperty(nameof(GymProvisioningRecord.IdempotencyKey))!.GetColumnName());
+        Assert.Equal("AccountId", request.FindProperty(nameof(GymProvisioningRecord.InitialAdminAccountId))!.GetColumnName());
+        Assert.Equal("PK_ProvisioningRequests", request.FindPrimaryKey()!.GetName());
+        Assert.Contains(request.GetIndexes(), index => index.GetDatabaseName() == "IX_ProvisioningRequests_AccountId");
+        Assert.Equal("LeaseOwner", model.FindEntityType(typeof(ActivationOutbox))!.FindProperty(nameof(ActivationOutbox.LeaseOwner))!.GetColumnName());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IdentityTokens_PreservePurposesAcrossGenericUserTypes(bool dedicatedReset)
+    {
+        using var legacyContext = new Microsoft.AspNetCore.Identity.EntityFrameworkCore.IdentityUserContext<IdentityUser>(
+            new DbContextOptionsBuilder<Microsoft.AspNetCore.Identity.EntityFrameworkCore.IdentityUserContext<IdentityUser>>()
+                .UseSqlite("Data Source=:memory:").Options);
+        using var currentContext = new StaticXDbContext(new DbContextOptionsBuilder<StaticXDbContext>().UseSqlite("Data Source=:memory:").Options);
+        using var services = new ServiceCollection().BuildServiceProvider();
+        using var legacyManager = Manager(new Microsoft.AspNetCore.Identity.EntityFrameworkCore.UserOnlyStore<IdentityUser>(legacyContext));
+        using var currentManager = Manager(new Microsoft.AspNetCore.Identity.EntityFrameworkCore.UserOnlyStore<IdentityAccount, StaticXDbContext>(currentContext));
+        var protection = new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider();
+        var expectedName = dedicatedReset ? "Static-X.PasswordReset.Identity.v1" : "DataProtectorTokenProvider";
+        var oldOptions = new DataProtectionTokenProviderOptions { Name = expectedName, TokenLifespan = TimeSpan.FromMinutes(dedicatedReset ? 30 : 1440) };
+        var legacy = new DataProtectorTokenProvider<IdentityUser>(protection, Options.Create(oldOptions),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<DataProtectorTokenProvider<IdentityUser>>.Instance);
+        DataProtectorTokenProvider<IdentityAccount> current = dedicatedReset
+            ? new PasswordResetTokenProvider(protection, Options.Create(new PasswordResetTokenProviderOptions()),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<DataProtectorTokenProvider<IdentityAccount>>.Instance)
+            : new DataProtectorTokenProvider<IdentityAccount>(protection, Options.Create(new DataProtectionTokenProviderOptions()),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<DataProtectorTokenProvider<IdentityAccount>>.Instance);
+        Assert.Equal(expectedName, current.Name);
+        Assert.Equal("Static-X.PasswordReset", PasswordResetTokenProvider.ProviderName);
+        Assert.Equal(TimeSpan.FromMinutes(30), new PasswordResetTokenProviderOptions().TokenLifespan);
+        var previousUser = new IdentityUser { Id = "persisted-id", SecurityStamp = "persisted-stamp" };
+        var renamedUser = new IdentityAccount { Id = previousUser.Id, SecurityStamp = previousUser.SecurityStamp };
+        var token = await legacy.GenerateAsync("ResetPassword", legacyManager, previousUser);
+        Assert.True(await current.ValidateAsync("ResetPassword", token, currentManager, renamedUser));
+        var currentToken = await current.GenerateAsync("ResetPassword", currentManager, renamedUser);
+        Assert.True(await legacy.ValidateAsync("ResetPassword", currentToken, legacyManager, previousUser));
+        Assert.False(await current.ValidateAsync("EmailConfirmation", token, currentManager, renamedUser));
+        renamedUser.SecurityStamp = "rotated-stamp";
+        Assert.False(await current.ValidateAsync("ResetPassword", token, currentManager, renamedUser));
+
+        UserManager<TUser> Manager<TUser>(IUserStore<TUser> store) where TUser : class =>
+            new(store, Options.Create(new IdentityOptions()), new PasswordHasher<TUser>(), [], [],
+                new UpperInvariantLookupNormalizer(), new IdentityErrorDescriber(), services,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<UserManager<TUser>>.Instance);
+    }
+
+    [Fact]
+    public void RenamedEntities_PreserveFrozenMigrationRelationalModelOffline()
+    {
+        using var context = new StaticXDbContext(new DbContextOptionsBuilder<StaticXDbContext>()
+            .UseSqlServer("Server=unused;Database=unused;Integrated Security=true").Options);
+        var assembly = context.GetService<IMigrationsAssembly>();
+        var migration = assembly.CreateMigration(assembly.Migrations["20261125013528_AddVideoLibrary"], context.Database.ProviderName!);
+        var frozen = context.GetService<Microsoft.EntityFrameworkCore.Infrastructure.IModelRuntimeInitializer>()
+            .Initialize(migration.TargetModel, designTime: true);
+        var current = context.GetService<Microsoft.EntityFrameworkCore.Metadata.IDesignTimeModel>().Model;
+        Assert.Empty(context.GetService<IMigrationsModelDiffer>().GetDifferences(frozen.GetRelationalModel(), current.GetRelationalModel()));
+        Assert.False(context.Database.HasPendingModelChanges());
+    }
+
     private static readonly (Type Contract, Type Implementation)[] Services =
     [
         (typeof(IAccountService), typeof(AccountService)),
@@ -39,14 +148,20 @@ public class ArchitectureTests
         (typeof(IStudentService), typeof(StudentService)),
         (typeof(IDashboardService), typeof(DashboardService)),
         (typeof(IPaymentService), typeof(PaymentService)),
-        (typeof(IRoutineService), typeof(RoutineService))
+        (typeof(IRoutineService), typeof(RoutineService)),
+        (typeof(IVideoLibraryService), typeof(VideoLibraryService))
+    ];
+
+    private static readonly (Type Contract, Type Implementation)[] DeclaredServices =
+    [
+        .. Services
     ];
 
     [Fact]
     public void ServiceInterfaces_PreservePublicSignaturesAndDefaults()
     {
         var nullability = new NullabilityInfoContext();
-        foreach (var (contract, implementation) in Services)
+        foreach (var (contract, implementation) in DeclaredServices)
         {
             Assert.Equal("BLL.Services.Interfaces", contract.Namespace);
             Assert.Contains(contract, implementation.GetInterfaces());
@@ -82,13 +197,17 @@ public class ArchitectureTests
     {
         var contracts = typeof(AccountService).Assembly.GetExportedTypes().Where(type => type.IsInterface &&
             type.Namespace is "BLL.Services.Interfaces" or "BLL.Interfaces").ToArray();
-        Assert.Equal(11, contracts.Length);
+        Assert.Equal(13, contracts.Length);
+        Assert.Equal(DeclaredServices.Select(pair => pair.Contract)
+                .Concat(new[] { typeof(IActivationEmailSender), typeof(IPasswordRecoveryEmailSender), typeof(IVideoObjectStore) })
+                .OrderBy(type => type.FullName),
+            contracts.OrderBy(type => type.FullName));
         Assert.Contains(typeof(BLL.Interfaces.IPasswordRecoveryEmailSender), contracts);
         Assert.Contains(typeof(IAccountService), contracts);
         Assert.Contains(typeof(IPasswordRecoveryDispatcher), contracts);
         Assert.Contains(typeof(IRoutineService), contracts);
         Assert.Contains(typeof(IDashboardService), contracts);
-        foreach (var type in contracts.Concat(Services.Select(pair => pair.Implementation)))
+        foreach (var type in contracts.Concat(DeclaredServices.Select(pair => pair.Implementation)))
         {
             foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
             {
@@ -153,8 +272,8 @@ public class ArchitectureTests
     public void EntityBoundaryCheck_TraversesNestedResults_AndAllowsDomainEnums()
     {
         Assert.True(ExposesEntity(typeof(Task<IReadOnlyList<Account>>), new HashSet<Type>()));
-        Assert.True(ExposesEntity(typeof(Dictionary<string, List<Alumno[]>>), new HashSet<Type>()));
-        Assert.True(ExposesEntity(typeof(Task<Gimnasio>), new HashSet<Type>()));
+        Assert.True(ExposesEntity(typeof(Dictionary<string, List<Student[]>>), new HashSet<Type>()));
+        Assert.True(ExposesEntity(typeof(Task<Gym>), new HashSet<Type>()));
         Assert.False(ExposesEntity(typeof(BLL.DTOs.Accounts.AccountResponse), new HashSet<Type>()));
         Assert.False(ExposesEntity(typeof(CancellationToken), new HashSet<Type>()));
         Assert.False(ExposesEntity(typeof(AccountRole), new HashSet<Type>()));
@@ -199,7 +318,7 @@ public class ArchitectureTests
                 }
             }
         }
-        Assert.Same(typeof(Account).Assembly, typeof(GymAccount).Assembly); // Retain the explicit Identity adapter.
+        Assert.Same(typeof(Account).Assembly, typeof(IdentityAccount).Assembly); // Retain the explicit Identity adapter.
     }
 
     private static IEnumerable<MemberInfo> ReferencedMembers(MethodInfo method)
@@ -287,6 +406,10 @@ public class ArchitectureTests
         Assert.IsType<AccountRepository>(repository);
         Assert.Same(repository, first.ServiceProvider.GetRequiredService<IAccountRepository>());
         Assert.NotSame(repository, second.ServiceProvider.GetRequiredService<IAccountRepository>());
+        Assert.IsType<VideoLibraryRepository>(Assert.Single(first.ServiceProvider.GetServices<IVideoLibraryRepository>()));
+        var store = Assert.IsType<Static_X.API.Integrations.Storage.S3VideoObjectStore>(Assert.Single(first.ServiceProvider.GetServices<IVideoObjectStore>()));
+        Assert.Same(store, first.ServiceProvider.GetRequiredService<IVideoObjectStore>());
+        Assert.NotSame(store, second.ServiceProvider.GetRequiredService<IVideoObjectStore>());
     }
 
     [Fact]
@@ -307,9 +430,9 @@ public class ArchitectureTests
         configuration.AssertConfigurationIsValid();
         Assert.Equal("", factory.Services.GetRequiredService<IOptions<MapperConfigurationExpression>>().Value.LicenseKey);
         Assert.Equal(new[] { "AccountProfile", "AccountProfile", "AccountProfile", "DashboardProfile", "GymProfile", "PaymentProfile", "PaymentProfile",
-                "RoutineProfile", "RoutineProfile", "RoutineProfile", "StudentProfile" },
+                "RoutineProfile", "RoutineProfile", "RoutineProfile", "StudentProfile", "VideoProfile" },
             configuration.Internal().GetAllTypeMaps().Select(map => map.Profile.Name.Split('.').Last()).Order());
-        var result = mapper.Map<StudentResponse>(new Alumno { Id = 73, Nombre = "DI name", Apellido = "DI surname", Email = "DI@EXAMPLE.COM" });
+        var result = mapper.Map<StudentResponse>(new Student { Id = 73, FirstName = "DI name", LastName = "DI surname", Email = "DI@EXAMPLE.COM" });
         Assert.Equal((73, "DI name", "DI surname", "DI@EXAMPLE.COM"),
             (result.Id, result.Nombre, result.Apellido, result.Email));
     }
@@ -322,7 +445,7 @@ public class ArchitectureTests
         foreach (var service in new[] { typeof(ActivationService), typeof(ActivationDispatcher) })
             Assert.DoesNotContain(service.GetConstructors().SelectMany(constructor => constructor.GetParameters()),
                 parameter => parameter.ParameterType == typeof(IMapper));
-        foreach (var service in new[] { typeof(StudentService), typeof(AccountService), typeof(GymService), typeof(DashboardService) })
+        foreach (var service in new[] { typeof(StudentService), typeof(AccountService), typeof(GymService), typeof(DashboardService), typeof(VideoLibraryService) })
             Assert.Single(service.GetConstructors().Single().GetParameters(), parameter => parameter.ParameterType == typeof(IMapper));
     }
 
@@ -334,11 +457,11 @@ public class ArchitectureTests
         Assert.Equal(typeof(object), typeof(Account).BaseType);
         Assert.All(typeof(Account).GetProperties(), property =>
             Assert.DoesNotContain("Microsoft.AspNetCore", property.PropertyType.FullName ?? ""));
-        Assert.Equal(typeof(IdentityUser), typeof(GymAccount).BaseType);
-        Assert.Equal("DAL", typeof(GymAccount).Namespace);
-        Assert.Same(typeof(Account).Assembly, typeof(GymAccount).Assembly);
+        Assert.Equal(typeof(IdentityUser), typeof(IdentityAccount).BaseType);
+        Assert.Equal("DAL", typeof(IdentityAccount).Namespace);
+        Assert.Same(typeof(Account).Assembly, typeof(IdentityAccount).Assembly);
         Assert.Same(typeof(Account).Assembly, typeof(ActivationInvitation).Assembly);
-        Assert.Same(typeof(Account).Assembly, typeof(ProvisioningRequest).Assembly);
+        Assert.Same(typeof(Account).Assembly, typeof(GymProvisioningRecord).Assembly);
         Assert.Same(typeof(Account).Assembly, typeof(ActivationDelivery).Assembly);
         Assert.NotSame(typeof(Account).Assembly, typeof(StaticXDbContext).Assembly);
     }
@@ -351,14 +474,16 @@ public class ArchitectureTests
         Assert.Same(typeof(StaticXDbContext).Assembly, typeof(global::DAL.Repositories.Models.GymPage).Assembly);
         Assert.Same(typeof(StaticXDbContext).Assembly, typeof(global::DAL.Repositories.Models.PendingAdministratorPage).Assembly);
         Assert.Same(typeof(StaticXDbContext).Assembly, typeof(global::DAL.Repositories.Models.DashboardStudentCounts).Assembly);
-        Assert.Equal(typeof(IReadOnlyList<Gimnasio>), typeof(global::DAL.Repositories.Models.GymPage).GetProperty("Items")!.PropertyType);
+        Assert.Equal(typeof(IReadOnlyList<Gym>), typeof(global::DAL.Repositories.Models.GymPage).GetProperty("Items")!.PropertyType);
         Assert.Equal(typeof(IReadOnlyList<Account>), typeof(global::DAL.Repositories.Models.PendingAdministratorPage).GetProperty("Items")!.PropertyType);
         var ports = new[] { typeof(IAccountRepository), typeof(IGymRepository),
             typeof(IStudentRepository), typeof(IDashboardRepository), typeof(IActivationRepository),
-            typeof(IActivationDeliveryRepository), typeof(IPaymentRepository), typeof(IRoutineRepository) };
+            typeof(IActivationDeliveryRepository), typeof(IPaymentRepository), typeof(IRoutineRepository), typeof(IVideoLibraryRepository) };
         Assert.All(ports, port => Assert.Equal("DAL.Repositories.Interfaces", port.Namespace));
         Assert.Equal("BLL.Interfaces", typeof(IActivationEmailSender).Namespace);
         Assert.Equal("BLL.Interfaces", typeof(BLL.Interfaces.IPasswordRecoveryEmailSender).Namespace);
+        Assert.Equal("BLL.Interfaces", typeof(IVideoObjectStore).Namespace);
+        Assert.Same(typeof(AccountService).Assembly, typeof(IVideoObjectStore).Assembly);
 
         var assembly = typeof(AccountService).Assembly;
         var businessTypes = assembly.GetTypes().Where(type => type.Namespace == "BLL" ||
@@ -385,10 +510,10 @@ public class ArchitectureTests
                 .Any(parameter => parameter.ParameterType.Namespace?.StartsWith("BLL", StringComparison.Ordinal) == true));
         Assert.Equal("DAL.Repositories.Interfaces", typeof(ActivationDelivery).Namespace);
         var repositories = new[] { typeof(AccountRepository), typeof(GymRepository), typeof(StudentRepository), typeof(DashboardRepository),
-            typeof(ActivationRepository), typeof(ActivationDeliveryRepository), typeof(RoutineRepository) };
+            typeof(ActivationRepository), typeof(ActivationDeliveryRepository), typeof(RoutineRepository), typeof(VideoLibraryRepository) };
         Assert.All(repositories, repository => Assert.Equal("DAL.Repositories.Implementation", repository.Namespace));
         Assert.All(repositories.Concat(ports), type => Assert.Same(dataAssembly, type.Assembly));
-        Assert.All(Services, pair =>
+        Assert.All(DeclaredServices, pair =>
         {
             Assert.Same(assembly, pair.Contract.Assembly);
             Assert.Same(assembly, pair.Implementation.Assembly);
@@ -406,10 +531,10 @@ public class ArchitectureTests
         var options = new DbContextOptionsBuilder<StaticXDbContext>()
             .UseSqlite("Data Source=:memory:").Options;
         using var context = new StaticXDbContext(options);
-        var user = context.Model.FindEntityType(typeof(GymAccount));
+        var user = context.Model.FindEntityType(typeof(IdentityAccount));
         Assert.NotNull(user);
         Assert.Equal("AspNetUsers", user.GetTableName());
-        Assert.Equal(typeof(string), user.FindProperty(nameof(GymAccount.Role))?.GetTypeMapping().Converter?.ProviderClrType);
+        Assert.Equal(typeof(string), user.FindProperty(nameof(IdentityAccount.Role))?.GetTypeMapping().Converter?.ProviderClrType);
         Assert.Contains(user.GetIndexes(), index => index.IsUnique &&
             index.Properties.Select(property => property.Name).SequenceEqual(new[] { "GymId", "NormalizedEmail" }));
         Assert.Null(context.Model.FindEntityType(typeof(ActivationDelivery)));
@@ -443,7 +568,7 @@ public class ArchitectureTests
         var entity = XDocument.Load(Path.Combine(root, "src", "Static_X.Entity", "Static_X.Entity.csproj"));
         Assert.Empty(entity.Descendants("PackageReference"));
         Assert.Equal("Microsoft.AspNetCore.App", entity.Descendants("FrameworkReference")
-            .Single().Attribute("Include")!.Value); // Deliberate GymAccount Identity exception, not EF.
+            .Single().Attribute("Include")!.Value); // Deliberate IdentityAccount Identity exception, not EF.
         var assemblies = new[] { typeof(Account).Assembly, typeof(StaticXDbContext).Assembly,
             typeof(AccountService).Assembly, typeof(Program).Assembly };
         foreach (var assembly in assemblies)
@@ -457,10 +582,10 @@ public class ArchitectureTests
         Assert.DoesNotContain(typeof(Account).Assembly.GetReferencedAssemblies(), reference =>
             reference.Name!.StartsWith("Microsoft.EntityFrameworkCore", StringComparison.Ordinal) ||
             reference.Name.StartsWith("Resend", StringComparison.Ordinal));
-        Assert.All(typeof(Account).Assembly.GetExportedTypes().Where(type => type != typeof(GymAccount)), type =>
+        Assert.All(typeof(Account).Assembly.GetExportedTypes().Where(type => type != typeof(IdentityAccount)), type =>
         {
             Assert.False(type.BaseType?.Namespace?.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal) == true,
-                $"Only GymAccount may inherit an ASP.NET Core type, not {type.FullName}.");
+                $"Only IdentityAccount may inherit an ASP.NET Core type, not {type.FullName}.");
             Assert.All(type.GetProperties(), property =>
                 Assert.False(property.PropertyType.Namespace?.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal) == true,
                     $"Domain property {type.FullName}.{property.Name} must not expose ASP.NET Core types."));
@@ -483,7 +608,7 @@ public class ArchitectureTests
             "20261028230341_AddGlobalSuperAdmin", "20261109221729_AddPasswordRecoveryOutbox",
             "20261111012132_AddTenantAccountInvitations", "20261116000000_AddPayments",
             "20261119013122_AddStudentRoutines", "20261123000000_AddRoutineMetadata",
-            "20261123010000_AddExerciseDuration"
+            "20261123010000_AddExerciseDuration", "20261125013528_AddVideoLibrary"
         }, migrations.Migrations.Keys);
         Assert.False(context.Database.HasPendingModelChanges());
         var script = context.GetService<IMigrator>().GenerateScript();
@@ -509,7 +634,7 @@ public class ArchitectureTests
         Assert.DoesNotContain("DROP TABLE", script);
         Assert.DoesNotContain("DELETE", script);
         Assert.DoesNotContain("CREATE TABLE [Alumnos]", script);
-        Assert.Empty(context.Model.FindEntityType(typeof(Alumno))!.GetDeclaredQueryFilters());
+        Assert.Empty(context.Model.FindEntityType(typeof(Student))!.GetDeclaredQueryFilters());
     }
 
     [Fact]

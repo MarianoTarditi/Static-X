@@ -20,10 +20,10 @@ public sealed class StudentRepository : IStudentRepository
     }
 
     /// <summary>Agrega el alumno al contexto, guarda los cambios y devuelve la entidad persistida.</summary>
-    public async Task<Alumno> AddAsync(Alumno student, CancellationToken cancellationToken)
+    public async Task<Student> AddAsync(Student student, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        student.Activo = true;
+        student.IsActive = true;
         await context.Alumnos.AddAsync(student, cancellationToken);
         try
         {
@@ -38,19 +38,19 @@ public sealed class StudentRepository : IStudentRepository
     }
 
     /// <summary>Actualiza únicamente los campos de ficha de un alumno localizado por gimnasio e identificador.</summary>
-    public async Task<Alumno?> UpdateAsync(int gimnasioId, int studentId, string nombre, string apellido, string email,
+    public async Task<Student?> UpdateAsync(int gimnasioId, int studentId, string nombre, string apellido, string email,
         CancellationToken cancellationToken)
     {
         var student = await context.Alumnos.SingleOrDefaultAsync(
-            s => s.GimnasioId == gimnasioId && s.Id == studentId, cancellationToken);
+            s => s.GymId == gimnasioId && s.Id == studentId, cancellationToken);
         if (student is null) return null;
 
-        student.Nombre = nombre;
-        student.Apellido = apellido;
+        student.FirstName = nombre;
+        student.LastName = apellido;
         student.Email = email;
         // Issue a write even for identical fields so a deletion after retrieval is not reported as success.
-        context.Entry(student).Property(s => s.Nombre).IsModified = true;
-        context.Entry(student).Property(s => s.Apellido).IsModified = true;
+        context.Entry(student).Property(s => s.FirstName).IsModified = true;
+        context.Entry(student).Property(s => s.LastName).IsModified = true;
         context.Entry(student).Property(s => s.Email).IsModified = true;
         try
         {
@@ -89,28 +89,28 @@ public sealed class StudentRepository : IStudentRepository
     }
 
     /// <summary>Busca sin seguimiento un alumno por su identificador y el gimnasio al que pertenece.</summary>
-    public Task<Alumno?> FindAsync(int gimnasioId, int studentId, CancellationToken cancellationToken) =>
+    public Task<Student?> FindAsync(int gimnasioId, int studentId, CancellationToken cancellationToken) =>
         context.Alumnos.AsNoTracking()
-            .SingleOrDefaultAsync(s => s.GimnasioId == gimnasioId && s.Id == studentId, cancellationToken);
+            .SingleOrDefaultAsync(s => s.GymId == gimnasioId && s.Id == studentId, cancellationToken);
 
     /// <summary>Cuenta las coincidencias del gimnasio y obtiene una página ordenada sin seguimiento mediante consultas secuenciales.</summary>
     public async Task<StudentPage> ListAsync(int gimnasioId, bool? activo, string? search, int offset, int pageSize, CancellationToken cancellationToken)
     {
-        var query = context.Alumnos.Where(s => s.GimnasioId == gimnasioId);
-        if (activo.HasValue) query = query.Where(s => s.Activo == activo.Value);
+        var query = context.Alumnos.Where(s => s.GymId == gimnasioId);
+        if (activo.HasValue) query = query.Where(s => s.IsActive == activo.Value);
         if (search is not null)
-            query = query.Where(s => s.Nombre.ToUpper().Contains(search) ||
-                s.Apellido.ToUpper().Contains(search) || s.Email.ToUpper().Contains(search));
+            query = query.Where(s => s.FirstName.ToUpper().Contains(search) ||
+                s.LastName.ToUpper().Contains(search) || s.Email.ToUpper().Contains(search));
         var totalCount = await query.CountAsync(cancellationToken);
         var items = await query.AsNoTracking().OrderBy(s => s.Id).Skip(offset).Take(pageSize).ToListAsync(cancellationToken);
         return new StudentPage(items, totalCount);
     }
 
     /// <summary>Sincroniza atómicamente el estado de la ficha y el acceso de su cuenta Student explícitamente vinculada.</summary>
-    public async Task<Alumno?> SetActiveAsync(int gimnasioId, int studentId, bool active, CancellationToken cancellationToken)
+    public async Task<Student?> SetActiveAsync(int gimnasioId, int studentId, bool active, CancellationToken cancellationToken)
     {
         var student = await context.Alumnos.SingleOrDefaultAsync(
-            s => s.GimnasioId == gimnasioId && s.Id == studentId, cancellationToken);
+            s => s.GymId == gimnasioId && s.Id == studentId, cancellationToken);
         if (student is null) return null;
         // Preserve the historical unlinked save/refresh and post-save cancellation contract.
         // AccountId is a concurrency token: an invitation that binds after this read makes this write fail closed.
@@ -120,7 +120,7 @@ public sealed class StudentRepository : IStudentRepository
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         await TenantAccountLock.AcquireAsync(context, gimnasioId, cancellationToken);
         await context.Entry(student).ReloadAsync(cancellationToken);
-        if (context.Entry(student).State == EntityState.Detached || student.GimnasioId != gimnasioId)
+        if (context.Entry(student).State == EntityState.Detached || student.GymId != gimnasioId)
             throw new DbUpdateConcurrencyException("The student is no longer available in the requested gym.");
         if (student.AccountId is not null)
         {
@@ -147,13 +147,13 @@ public sealed class StudentRepository : IStudentRepository
     }
 
     /// <summary>Guarda únicamente el estado de la ficha y actualiza su lectura, comprobando el vínculo original frente a cambios concurrentes.</summary>
-    private async Task<Alumno> SaveStateAsync(Alumno student, bool active, CancellationToken cancellationToken)
+    private async Task<Student> SaveStateAsync(Student student, bool active, CancellationToken cancellationToken)
     {
-        student.Activo = active;
+        student.IsActive = active;
         // Force an UPDATE even for an idempotent call so a concurrent deletion cannot produce false success.
-        context.Entry(student).Property(s => s.Activo).IsModified = true;
+        context.Entry(student).Property(s => s.IsActive).IsModified = true;
         await context.SaveChangesAsync(cancellationToken);
-        return await FindAsync(student.GimnasioId, student.Id, cancellationToken)
+        return await FindAsync(student.GymId, student.Id, cancellationToken)
             ?? throw new DbUpdateConcurrencyException("The student is no longer available in the requested gym after the state update.");
     }
 }

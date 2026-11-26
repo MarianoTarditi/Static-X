@@ -25,7 +25,7 @@ public sealed class TenantStudentTests
         var secondStudent = await students.AddAsync(second.Id, new CreateStudentRequest { Nombre = "Ben", Apellido = "Jones", Email = "ana@example.com" });
 
         Assert.Equal("First gym", first.Nombre);
-        Assert.Equal(first.Id, (await db.Context.Alumnos.SingleAsync(s => s.Id == created.Id)).GimnasioId);
+        Assert.Equal(first.Id, (await db.Context.Alumnos.SingleAsync(s => s.Id == created.Id)).GymId);
         Assert.Equal("Ana", created.Nombre);
         Assert.Equal("Smith", created.Apellido);
         Assert.Equal("ANA@EXAMPLE.COM", created.Email);

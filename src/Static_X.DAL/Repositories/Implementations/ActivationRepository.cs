@@ -11,24 +11,24 @@ namespace DAL.Repositories.Implementation;
 public sealed class ActivationRepository : IActivationRepository
 {
     private readonly StaticXDbContext context;
-    private readonly UserManager<GymAccount> users;
+    private readonly UserManager<IdentityAccount> users;
 
     /// <summary>Recibe el contexto transaccional y el administrador de cuentas Identity.</summary>
-    public ActivationRepository(StaticXDbContext context, UserManager<GymAccount> users)
+    public ActivationRepository(StaticXDbContext context, UserManager<IdentityAccount> users)
     {
         this.context = context;
         this.users = users;
     }
 
     /// <summary>Selecciona cuentas pendientes con procedencia documentada y vínculo de ficha explícito cuando corresponde.</summary>
-    private IQueryable<GymAccount> PendingTargets(int gymId, AccountRole role, bool requireActive) => context.Users.Where(u =>
+    private IQueryable<IdentityAccount> PendingTargets(int gymId, AccountRole role, bool requireActive) => context.Users.Where(u =>
         u.GymId == gymId && u.Role == role && !u.EmailConfirmed && u.PasswordHash == null && (!requireActive || u.IsEnabled) &&
         (role == AccountRole.GymAdmin
-            ? context.ProvisioningRequests.Any(r => r.GymId == gymId && r.AccountId == u.Id)
+            ? context.ProvisioningRequests.Any(r => r.GymId == gymId && r.InitialAdminAccountId == u.Id)
             : (role == AccountRole.Trainer || role == AccountRole.Student) &&
                 context.TenantInvitationRequests.Any(r => r.GymId == gymId && r.AccountId == u.Id && r.Role == role &&
                     r.NormalizedEmail == u.NormalizedEmail && (role == AccountRole.Trainer ||
-                        context.Alumnos.Any(s => s.Id == r.StudentId && s.GimnasioId == gymId && s.AccountId == u.Id && (!requireActive || s.Activo))))));
+                        context.Alumnos.Any(s => s.Id == r.StudentId && s.GymId == gymId && s.AccountId == u.Id && (!requireActive || s.IsActive))))));
 
     /// <summary>Obtiene el historial de emisión con la fecha inmutable del envío, sin depender de su entrega ni de su vigencia.</summary>
     private IQueryable<InvitationLifecycleItem> History(int gymId, string accountId, AccountRole role) =>
@@ -134,25 +134,25 @@ public sealed class ActivationRepository : IActivationRepository
             return new Account(previous.AccountId, previous.GymId, previous.NormalizedEmail, previous.Role);
         }
 
-        Alumno? student = null;
+        Student? student = null;
         if (studentId is int selectedId)
         {
-            student = await context.Alumnos.SingleOrDefaultAsync(s => s.Id == selectedId && s.GimnasioId == gymId, cancellationToken);
+            student = await context.Alumnos.SingleOrDefaultAsync(s => s.Id == selectedId && s.GymId == gymId, cancellationToken);
             if (student is null) return null;
-            if (!student.Activo) throw new ProvisioningConflictException();
+            if (!student.IsActive) throw new ProvisioningConflictException();
         }
         var account = await context.Users.SingleOrDefaultAsync(u => u.GymId == gymId && u.NormalizedEmail == normalized, cancellationToken);
         if (account is null)
         {
             if (student?.AccountId is not null) throw new ProvisioningConflictException();
             var id = Guid.NewGuid().ToString("N");
-            account = new GymAccount { Id = id, UserName = id, Email = email, GymId = gymId, Role = role };
+            account = new IdentityAccount { Id = id, UserName = id, Email = email, GymId = gymId, Role = role };
             if (!(await users.CreateAsync(account)).Succeeded) throw new ProvisioningConflictException();
             if (student is not null)
             {
                 // Pair the invitation claim with the unlinked writer's AccountId concurrency check.
                 // The active predicate is rechecked in the write, not just the earlier selection.
-                var linked = await context.Alumnos.Where(s => s.Id == studentId && s.GimnasioId == gymId && s.Activo && s.AccountId == null)
+                var linked = await context.Alumnos.Where(s => s.Id == studentId && s.GymId == gymId && s.IsActive && s.AccountId == null)
                     .ExecuteUpdateAsync(s => s.SetProperty(s => s.AccountId, id), cancellationToken);
                 if (linked != 1) throw new ProvisioningConflictException();
                 await context.Entry(student).ReloadAsync(cancellationToken);
@@ -186,24 +186,24 @@ public sealed class ActivationRepository : IActivationRepository
     {
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         var existing = await context.ProvisioningRequests.AsNoTracking()
-            .SingleOrDefaultAsync(r => r.Key == key, cancellationToken);
+            .SingleOrDefaultAsync(r => r.IdempotencyKey == key, cancellationToken);
         if (existing is not null)
         {
             return await VerifyExistingAsync(existing, gymName, email, cancellationToken);
         }
 
-        var gym = new Gimnasio { Nombre = gymName };
+        var gym = new Gym { Name = gymName };
         context.Gimnasios.Add(gym);
         await context.SaveChangesAsync(cancellationToken);
         var id = Guid.NewGuid().ToString("N");
-        var accountToCreate = new GymAccount
+        var accountToCreate = new IdentityAccount
         {
             Id = id, UserName = id, GymId = gym.Id, Email = email, Role = AccountRole.GymAdmin
         };
         var created = await users.CreateAsync(accountToCreate);
         if (!created.Succeeded)
             throw new InvalidOperationException("Account creation failed.");
-        context.ProvisioningRequests.Add(new ProvisioningRequest { Key = key, GymId = gym.Id, AccountId = id });
+        context.ProvisioningRequests.Add(new GymProvisioningRecord { IdempotencyKey = key, GymId = gym.Id, InitialAdminAccountId = id });
         context.ActivationInvitations.Add(new ActivationInvitation
         {
             Id = invitationId, GymId = gym.Id, AccountId = id, TokenHash = tokenHash, ExpiresAt = expiresAt.UtcDateTime
@@ -224,7 +224,7 @@ public sealed class ActivationRepository : IActivationRepository
             // A competing transaction committed the same key while this transaction was open.
             // Recheck the committed request; do not turn an unrelated unique violation into success.
             var winner = await context.ProvisioningRequests.AsNoTracking()
-                .SingleOrDefaultAsync(r => r.Key == key, cancellationToken);
+                .SingleOrDefaultAsync(r => r.IdempotencyKey == key, cancellationToken);
             if (winner is null) throw;
             return await VerifyExistingAsync(winner, gymName, email, cancellationToken);
         }
@@ -232,14 +232,14 @@ public sealed class ActivationRepository : IActivationRepository
     }
 
     /// <summary>Comprueba que la clave previa corresponda al nombre de gimnasio, correo normalizado y rol de administrador solicitados.</summary>
-    private async Task<int> VerifyExistingAsync(ProvisioningRequest existing, string gymName, string email,
+    private async Task<int> VerifyExistingAsync(GymProvisioningRecord existing, string gymName, string email,
         CancellationToken cancellationToken)
     {
-        var account = await context.Users.AsNoTracking().SingleAsync(u => u.Id == existing.AccountId, cancellationToken);
+        var account = await context.Users.AsNoTracking().SingleAsync(u => u.Id == existing.InitialAdminAccountId, cancellationToken);
         if (account.Role != AccountRole.GymAdmin ||
             account.NormalizedEmail != users.NormalizeEmail(email) ||
             await context.Gimnasios.Where(g => g.Id == existing.GymId)
-                .Select(g => g.Nombre).SingleAsync(cancellationToken) != gymName)
+                .Select(g => g.Name).SingleAsync(cancellationToken) != gymName)
             throw new ProvisioningConflictException();
         return existing.GymId;
     }
@@ -264,7 +264,7 @@ public sealed class ActivationRepository : IActivationRepository
         if (invitation.ExpectedRole != AccountRole.GymAdmin && !await context.TenantInvitationRequests.AsNoTracking()
             .AnyAsync(r => r.GymId == gymId && r.AccountId == account.Id && r.Role == invitation.ExpectedRole &&
                 r.NormalizedEmail == account.NormalizedEmail && (r.Role == AccountRole.Trainer ||
-                    context.Alumnos.Any(s => s.Id == r.StudentId && s.GimnasioId == gymId && s.Activo && s.AccountId == account.Id)), cancellationToken))
+                    context.Alumnos.Any(s => s.Id == r.StudentId && s.GymId == gymId && s.IsActive && s.AccountId == account.Id)), cancellationToken))
             return null;
         // Conditional SQL claim serializes contenders before Identity writes; rollback restores it on failure.
         var claimed = await context.ActivationInvitations

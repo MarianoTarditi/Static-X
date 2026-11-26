@@ -10,8 +10,8 @@ public sealed class GymProfile : Profile
     /// <summary>Configura los parámetros del constructor de la respuesta sin aplicar reglas de negocio.</summary>
     public GymProfile()
     {
-        CreateMap<Gimnasio, GymResponse>()
+        CreateMap<Gym, GymResponse>()
             .ForCtorParam("id", options => options.MapFrom(source => source.Id))
-            .ForCtorParam("nombre", options => options.MapFrom(source => source.Nombre));
+            .ForCtorParam("nombre", options => options.MapFrom(source => source.Name));
     }
 }

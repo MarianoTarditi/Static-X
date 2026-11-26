@@ -36,3 +36,24 @@ API owns uploads, range responses, and the S3 adapter. BLL owns catalog DTOs, au
 - [ ] Deletion hides the entry immediately from new requests, even if physical cleanup is delayed. Cleanup retries do not delete current objects.
 
 Out of scope: frontend, per-student assignment, links from exercises, transcoding, and configuration of a live bucket or application of a database migration during local implementation.
+
+## Current integration status
+
+The bounded HTTP integration exposes **only `GET /api/routines/videos`**. It uses the existing BLL service, response mapping and gym-scoped DAL repository. The gym and role come from authenticated claims, never query parameters. Trainer access and the default live Student coverage middleware remain in force. The catalog accepts `page` (1–100000, default 1), `pageSize` (1–100, default 20) and optional `category` (`informational` or `exercise`), returning `{ "items": [...] }` with only ID, revision, title, category, description and length.
+
+Upload, playback, replacement and deletion HTTP endpoints and the cleanup worker are **not composed in this unit**. Existing BLL/DAL operations do not imply that these routes are available. The acceptance checklist above describes the full design, not completed HTTP functionality.
+
+### External storage configuration
+
+API composition registers the real `S3VideoObjectStore` adapter using `AWSSDK.S3`. The catalog never calls storage. Storage validation and SDK client creation occur only on an actual storage operation, so missing storage configuration does not prevent host startup or catalog reads.
+
+| External setting | Requirement |
+| --- | --- |
+| `VideoStorage__BucketName` | Explicit private standard AWS S3 bucket; 3–63 lowercase letters, digits or hyphens, starting and ending with a letter or digit. Directory buckets and dotted names are not supported by this adapter. |
+| `VideoStorage__Region` | Explicit region recognized by the installed SDK. |
+| `VideoStorage__AccessKeyId` | Explicit access key from an external secret provider. |
+| `VideoStorage__SecretAccessKey` | Explicit secret key from an external secret provider. |
+
+No bucket, credentials or custom endpoint are inferred from the SDK's ambient configuration. The adapter uses HTTPS AWS regional endpoints and ignores configured SDK endpoint URL overrides. It performs no startup probe. Object writes use `If-None-Match: *` to prevent overwriting an existing key; reads request and validate the exact byte interval and transfer response ownership to the returned stream. Delete uses S3's idempotent object deletion operation. Storage errors and cancellation are not converted to successful outcomes. SDK automatic retries are disabled; durable cleanup retries remain the repository's responsibility when a separately authorized worker is introduced.
+
+Operators must separately provision a private bucket with public access blocked, restrictive IAM permissions for the required object operations, and suitable encryption/lifecycle settings. This work does not provision or contact a bucket, configure credentials, apply migrations, or enable background video activity. Adapter tests replace SDK operations; HTTP tests use only the in-process host and local SQLite persistence. Live S3 interoperability remains unverified.

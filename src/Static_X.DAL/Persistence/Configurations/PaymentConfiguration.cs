@@ -7,15 +7,15 @@ public static class PaymentConfiguration
 {
     public static void Configure(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<Alumno>().HasAlternateKey(s => new { s.GimnasioId, s.Id });
-        modelBuilder.Entity<Alumno>().Property(s => s.PaymentRevision).IsConcurrencyToken().HasDefaultValue(0L);
+        modelBuilder.Entity<Student>().HasAlternateKey(s => new { s.GymId, s.Id }).HasName("AK_Alumnos_GimnasioId_Id");
+        modelBuilder.Entity<Student>().Property(s => s.PaymentRevision).IsConcurrencyToken().HasDefaultValue(0L);
         modelBuilder.Entity<GymPassPrice>(price =>
         {
             price.HasKey(p => p.Id);
             price.HasAlternateKey(p => new { p.GymId, p.Id });
             price.HasIndex(p => new { p.GymId, p.EffectiveFrom }).IsUnique();
             price.Property(p => p.CreatedBy).HasMaxLength(450).IsRequired();
-            price.HasOne<Gimnasio>().WithMany().HasForeignKey(p => p.GymId).OnDelete(DeleteBehavior.Restrict);
+            price.HasOne<Gym>().WithMany().HasForeignKey(p => p.GymId).OnDelete(DeleteBehavior.Restrict);
             price.ToTable("GymPassPrices", t => t.HasCheckConstraint("CK_GymPassPrices_Amount", "[AmountCents] > 0 AND [AmountCents] <= 10000000000"));
         });
         modelBuilder.Entity<Payment>(payment =>
@@ -29,8 +29,8 @@ public static class PaymentConfiguration
             payment.Property(p => p.RequestFingerprint).HasMaxLength(64).IsRequired();
             payment.Property(p => p.VoidedBy).HasMaxLength(450);
             payment.Property(p => p.VoidReason).HasMaxLength(500);
-            payment.HasOne<Alumno>().WithMany().HasForeignKey(p => new { p.GymId, p.StudentId })
-                .HasPrincipalKey(s => new { s.GimnasioId, s.Id }).OnDelete(DeleteBehavior.Restrict);
+            payment.HasOne<Student>().WithMany().HasForeignKey(p => new { p.GymId, p.StudentId })
+                .HasPrincipalKey(s => new { s.GymId, s.Id }).OnDelete(DeleteBehavior.Restrict);
             payment.HasOne<GymPassPrice>().WithMany().HasForeignKey(p => new { p.GymId, p.PriceId })
                 .HasPrincipalKey(p => new { p.GymId, p.Id }).OnDelete(DeleteBehavior.Restrict);
             payment.HasOne<Payment>().WithMany().HasForeignKey(p => new { p.GymId, p.StudentId, p.PreviousPaymentId })

@@ -24,13 +24,13 @@ public sealed partial class AccountHttpTests
         var commands = new TrainerCommands();
         await using var db = new StaticXDbContext(new DbContextOptionsBuilder<StaticXDbContext>().UseSqlite(connection).AddInterceptors(commands).Options);
         await db.Database.EnsureCreatedAsync();
-        db.Gimnasios.AddRange(new Gimnasio { Id = 1, Nombre = "First" }, new Gimnasio { Id = 2, Nombre = "Second" });
+        db.Gimnasios.AddRange(new Gym { Id = 1, Name = "First" }, new Gym { Id = 2, Name = "Second" });
         db.Users.AddRange(
-            new GymAccount { Id = "z", UserName = "z", GymId = 1, Role = AccountRole.Trainer, Email = "z@example.invalid", IsEnabled = false },
-            new GymAccount { Id = "a", UserName = "a", GymId = 1, Role = AccountRole.Trainer, Email = "a@example.invalid", EmailConfirmed = true },
-            new GymAccount { Id = "foreign", UserName = "foreign", GymId = 2, Role = AccountRole.Trainer, Email = "foreign@example.invalid" },
-            new GymAccount { Id = "student", UserName = "student", GymId = 1, Role = AccountRole.Student, Email = "student@example.invalid" });
-        foreach (var entry in db.ChangeTracker.Entries<GymAccount>())
+            new IdentityAccount { Id = "z", UserName = "z", GymId = 1, Role = AccountRole.Trainer, Email = "z@example.invalid", IsEnabled = false },
+            new IdentityAccount { Id = "a", UserName = "a", GymId = 1, Role = AccountRole.Trainer, Email = "a@example.invalid", EmailConfirmed = true },
+            new IdentityAccount { Id = "foreign", UserName = "foreign", GymId = 2, Role = AccountRole.Trainer, Email = "foreign@example.invalid" },
+            new IdentityAccount { Id = "student", UserName = "student", GymId = 1, Role = AccountRole.Student, Email = "student@example.invalid" });
+        foreach (var entry in db.ChangeTracker.Entries<IdentityAccount>())
             entry.Entity.NormalizedEmail = entry.Entity.Email!.ToUpperInvariant();
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
@@ -184,7 +184,7 @@ public sealed partial class AccountHttpTests
         var gym = await app.CreateGymAsync();
         await SeedTrainerAsync(app, gym, "stale", true, true);
         using var staleScope = app.Factory.Services.CreateScope();
-        var users = staleScope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+        var users = staleScope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
         var stale = await users.FindByIdAsync("stale");
         Assert.NotNull(stale);
         var token = operation == "reset" ? await users.GeneratePasswordResetTokenAsync(stale) : null;
@@ -199,7 +199,7 @@ public sealed partial class AccountHttpTests
         var persisted = await verify.ServiceProvider.GetRequiredService<StaticXDbContext>().Users.AsNoTracking().SingleAsync();
         Assert.False(persisted.IsEnabled);
         Assert.NotEqual(stale.ConcurrencyStamp, persisted.ConcurrencyStamp);
-        Assert.True(await verify.ServiceProvider.GetRequiredService<UserManager<GymAccount>>().CheckPasswordAsync(persisted, "CorrectPassword1!"));
+        Assert.True(await verify.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>().CheckPasswordAsync(persisted, "CorrectPassword1!"));
     }
 
     private sealed class TrainerCommands : DbCommandInterceptor

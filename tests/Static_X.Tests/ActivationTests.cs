@@ -169,7 +169,7 @@ public sealed class ActivationTests
         var token = await fixture.GetTokenAsync();
         var invitation = await fixture.Context.ActivationInvitations.SingleAsync();
         var originalAccount = invitation.AccountId;
-        var trainer = new GymAccount
+        var trainer = new IdentityAccount
         {
             Id = Guid.NewGuid().ToString("N"), UserName = Guid.NewGuid().ToString("N"),
             GymId = invitation.GymId, Email = "trainer@example.com", Role = AccountRole.Trainer
@@ -331,20 +331,20 @@ public sealed class ActivationTests
         clock.Now = clock.Now.AddHours(1);
         Assert.True(await fixture.Service.ReissueAsync(gymId, accountId));
         var oldJob = await fixture.Context.ActivationOutbox.AsNoTracking()
-            .SingleAsync(o => o.Id == leased!.JobId);
+            .SingleAsync(o => o.Id == leased!.OutboxEntryId);
         Assert.Equal(string.Empty, oldJob.ProtectedToken);
         Assert.Null(oldJob.NextAttemptAt);
 
         var now = clock.Now;
         await worker.CompleteAsync(leased!, now, false, default);
-        oldJob = await fixture.Context.ActivationOutbox.AsNoTracking().SingleAsync(o => o.Id == leased!.JobId);
+        oldJob = await fixture.Context.ActivationOutbox.AsNoTracking().SingleAsync(o => o.Id == leased!.OutboxEntryId);
         Assert.Equal(string.Empty, oldJob.ProtectedToken);
         Assert.Null(oldJob.NextAttemptAt);
         Assert.Null(oldJob.LeaseOwner);
 
         var next = await worker.LeaseDueAsync(now.AddSeconds(1), default);
         Assert.NotNull(next);
-        Assert.NotEqual(leased.JobId, next!.JobId);
+        Assert.NotEqual(leased.OutboxEntryId, next!.OutboxEntryId);
         Assert.NotEqual(leased.InvitationId, next.InvitationId);
         Assert.NotEqual(string.Empty, next.ProtectedToken);
     }
@@ -367,11 +367,11 @@ public sealed class ActivationTests
             await first.CompleteAsync(lease!, now, false, default);
             var job = await fixture.Context.ActivationOutbox.AsNoTracking().SingleAsync();
             Assert.Equal(1, job.AttemptCount);
-            Assert.Equal(lease.JobId, job.Id);
+            Assert.Equal(lease.OutboxEntryId, job.Id);
             Assert.True(job.NextAttemptAt > now.UtcDateTime);
             var retry = await other.LeaseDueAsync(now.AddMinutes(2), default);
             Assert.NotNull(retry);
-            Assert.Equal(lease.JobId, retry!.JobId);
+            Assert.Equal(lease.OutboxEntryId, retry!.OutboxEntryId);
             await other.CompleteAsync(retry, now.AddMinutes(2), true, default);
             job = await fixture.Context.ActivationOutbox.AsNoTracking().SingleAsync();
             Assert.NotNull(job.SentAt);
@@ -470,8 +470,8 @@ public sealed class ActivationTests
         var other = otherScope.ServiceProvider.GetRequiredService<IActivationDeliveryRepository>();
         var reclaimed = await other.LeaseDueAsync(now.AddMinutes(6), default);
         Assert.NotNull(reclaimed);
-        Assert.Equal(first!.JobId, reclaimed!.JobId);
-        Assert.NotEqual(first.LeaseOwner, reclaimed.LeaseOwner);
+        Assert.Equal(first!.OutboxEntryId, reclaimed!.OutboxEntryId);
+        Assert.NotEqual(first.LeaseId, reclaimed.LeaseId);
         Assert.False(await fixture.DeliveryRepository.IsCurrentAsync(first, now.AddMinutes(6), default));
         await fixture.DeliveryRepository.CompleteAsync(first, now.AddMinutes(6), true, default);
         Assert.Null((await fixture.Context.ActivationOutbox.AsNoTracking().SingleAsync()).SentAt);
@@ -597,7 +597,7 @@ public sealed class ActivationTests
         private readonly IServiceScope scope;
         private readonly string keyDirectory;
         public StaticXDbContext Context { get; }
-        public UserManager<GymAccount> Users { get; }
+        public UserManager<IdentityAccount> Users { get; }
         public IActivationService Service { get; }
         public IActivationDeliveryRepository DeliveryRepository => scope.ServiceProvider.GetRequiredService<IActivationDeliveryRepository>();
         public IConfiguration Configuration => scope.ServiceProvider.GetRequiredService<IConfiguration>();
@@ -614,7 +614,7 @@ public sealed class ActivationTests
             this.scope = scope;
             this.keyDirectory = keyDirectory;
             Context = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
-            Users = scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+            Users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
             Service = scope.ServiceProvider.GetRequiredService<IActivationService>();
             protection = scope.ServiceProvider.GetRequiredService<IDataProtectionProvider>();
         }
@@ -640,9 +640,9 @@ public sealed class ActivationTests
                 o.UseSqlite(connectionString);
                 if (commitInterceptor is not null) o.AddInterceptors(commitInterceptor);
             });
-            services.AddIdentityCore<GymAccount>(o => o.User.RequireUniqueEmail = false)
+            services.AddIdentityCore<IdentityAccount>(o => o.User.RequireUniqueEmail = false)
                 .AddEntityFrameworkStores<StaticXDbContext>();
-            services.AddScoped<IUserValidator<GymAccount>, RejectBlockedEmail>();
+            services.AddScoped<IUserValidator<IdentityAccount>, RejectBlockedEmail>();
             services.AddScoped<IActivationRepository, ActivationRepository>();
             services.AddScoped<IActivationService, ActivationService>();
             services.AddScoped<IActivationDeliveryRepository, ActivationDeliveryRepository>();
@@ -672,9 +672,9 @@ public sealed class ActivationTests
         }
     }
 
-    private sealed class RejectBlockedEmail : IUserValidator<GymAccount>
+    private sealed class RejectBlockedEmail : IUserValidator<IdentityAccount>
     {
-        public Task<IdentityResult> ValidateAsync(UserManager<GymAccount> manager, GymAccount user) =>
+        public Task<IdentityResult> ValidateAsync(UserManager<IdentityAccount> manager, IdentityAccount user) =>
             Task.FromResult(user.Email == "blocked@example.com"
                 ? IdentityResult.Failed(new IdentityError { Code = "BlockedEmail" })
                 : IdentityResult.Success);

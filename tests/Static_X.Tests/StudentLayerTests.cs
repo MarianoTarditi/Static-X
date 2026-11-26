@@ -48,7 +48,7 @@ public sealed class StudentLayerTests
     public async Task List_ServiceNormalizesAndForwardsBoundsAndCancellation_MapsPersistedPage(string? search, string? expected)
     {
         var repository = new StubRepository { TotalCount = 42, Rows = new[]
-        { new Alumno { Id = 23, GimnasioId = 7, Nombre = "Persisted", Apellido = "Smith", Email = "A@B.COM", Activo = false } } };
+        { new Student { Id = 23, GymId = 7, FirstName = "Persisted", LastName = "Smith", Email = "A@B.COM", IsActive = false } } };
         using var cancellation = new CancellationTokenSource();
         var result = await new StudentService(repository, TestMapper.Instance).ListAsync(7,
             new StudentListRequest { Page = 3, PageSize = 5, Search = search, Activo = false }, cancellation.Token);
@@ -110,12 +110,12 @@ public sealed class StudentLayerTests
         Assert.Equal("Ana", result.Nombre);
         Assert.Equal("Smith", result.Apellido);
         Assert.Equal(email.ToUpperInvariant(), result.Email);
-        Assert.Equal(7, repository.Added?.GimnasioId);
+        Assert.Equal(7, repository.Added?.GymId);
         Assert.Equal(cancellation.Token, repository.Token);
         Assert.Equal(23, result.Id);
         Assert.NotNull(repository.Added);
         Assert.Equal((23, 7, "Ana", "Smith", email.ToUpperInvariant()),
-            (repository.Added.Id, repository.Added.GimnasioId, repository.Added.Nombre, repository.Added.Apellido, repository.Added.Email));
+            (repository.Added.Id, repository.Added.GymId, repository.Added.FirstName, repository.Added.LastName, repository.Added.Email));
         await service.ListAsync(7, new StudentListRequest(), cancellation.Token);
         Assert.Equal(cancellation.Token, repository.Token);
         Assert.Equal(7, repository.Gym);
@@ -158,8 +158,8 @@ public sealed class StudentLayerTests
         {
             Rows = new[]
             {
-                new Alumno { Id = 23, GimnasioId = 7, Nombre = "Ana", Apellido = "Smith", Email = "ANA@EXAMPLE.COM" },
-                new Alumno { Id = 24, GimnasioId = 7, Nombre = "Bea", Apellido = "Jones", Email = "BEA@EXAMPLE.COM" }
+                new Student { Id = 23, GymId = 7, FirstName = "Ana", LastName = "Smith", Email = "ANA@EXAMPLE.COM" },
+                new Student { Id = 24, GymId = 7, FirstName = "Bea", LastName = "Jones", Email = "BEA@EXAMPLE.COM" }
             }
         };
         var service = new StudentService(repository, TestMapper.Instance);
@@ -173,7 +173,7 @@ public sealed class StudentLayerTests
         Assert.Equal((24, "Bea", "Jones", "BEA@EXAMPLE.COM"), (found.Id, found.Nombre, found.Apellido, found.Email));
         Assert.Equal((7, 24, cancellation.Token), (repository.Gym, repository.Id, repository.Token));
         Assert.Null(await service.FindAsync(7, 99));
-        repository.Rows = Array.Empty<Alumno>();
+        repository.Rows = Array.Empty<Student>();
         Assert.Empty((await service.ListAsync(7, new StudentListRequest())).Items);
     }
 
@@ -196,7 +196,7 @@ public sealed class StudentLayerTests
     {
         var repository = new StubRepository
         {
-            WriteResult = new Alumno { Id = 71, GimnasioId = 7, Nombre = "Stored name", Apellido = "Stored surname", Email = "STORED@EXAMPLE.COM", Activo = false }
+            WriteResult = new Student { Id = 71, GymId = 7, FirstName = "Stored name", LastName = "Stored surname", Email = "STORED@EXAMPLE.COM", IsActive = false }
         };
         var service = new StudentService(repository, TestMapper.Instance);
         using var cancellation = new CancellationTokenSource();
@@ -210,7 +210,7 @@ public sealed class StudentLayerTests
         Assert.False(result.Activo);
         Assert.NotNull(repository.Added);
         Assert.Equal((7, "Input name", "Input surname", "INPUT@EXAMPLE.COM"),
-            (repository.Added.GimnasioId, repository.Added.Nombre, repository.Added.Apellido, repository.Added.Email));
+            (repository.Added.GymId, repository.Added.FirstName, repository.Added.LastName, repository.Added.Email));
         Assert.Equal((1, cancellation.Token), (repository.Calls, repository.Token));
     }
 
@@ -251,7 +251,7 @@ public sealed class StudentLayerTests
         using var cancellation = new CancellationTokenSource();
         await controller.CreateStudent(new CreateStudentRequest { Nombre = "Ana", Apellido = "Smith", Email = "ana@example.com" }, cancellation.Token);
         Assert.Equal(cancellation.Token, repository.Token);
-        Assert.Equal(7, repository.Added?.GimnasioId);
+        Assert.Equal(7, repository.Added?.GymId);
         await controller.GetStudents(new StudentListRequest(), cancellation.Token);
         Assert.Equal(cancellation.Token, repository.Token);
         Assert.Equal(7, repository.Gym);
@@ -348,7 +348,7 @@ public sealed class StudentLayerTests
         await using var db = new StaticXDbContext(new DbContextOptionsBuilder<StaticXDbContext>().UseSqlite(connection)
             .AddInterceptors(new SaveFailure(failure)).Options);
         var repository = new StudentRepository(db);
-        var student = new Alumno { GimnasioId = 1, Nombre = "Ana", Apellido = "Smith", Email = "ANA@EXAMPLE.COM" };
+        var student = new Student { GymId = 1, FirstName = "Ana", LastName = "Smith", Email = "ANA@EXAMPLE.COM" };
         if (duplicate)
         {
             await Assert.ThrowsAsync<DuplicateStudentEmailException>(() => repository.AddAsync(student, default));
@@ -362,14 +362,14 @@ public sealed class StudentLayerTests
         await using (var seed = new StaticXDbContext(new DbContextOptionsBuilder<StaticXDbContext>().UseSqlite(connection).Options))
         {
             await seed.Database.EnsureCreatedAsync();
-            seed.Gimnasios.Add(new Gimnasio { Id = 1, Nombre = "Gym" });
-            seed.Alumnos.Add(new Alumno { Id = 23, GimnasioId = 1, Nombre = "Original", Apellido = "Name", Email = "ORIGINAL@EXAMPLE.COM" });
+            seed.Gimnasios.Add(new Gym { Id = 1, Name = "Gym" });
+            seed.Alumnos.Add(new Student { Id = 23, GymId = 1, FirstName = "Original", LastName = "Name", Email = "ORIGINAL@EXAMPLE.COM" });
             await seed.SaveChangesAsync();
         }
         if (duplicate)
         {
             await Assert.ThrowsAsync<DuplicateStudentEmailException>(() => repository.UpdateAsync(1, 23, "New", "Name", "ANA@EXAMPLE.COM", default));
-            Assert.Empty(db.ChangeTracker.Entries<Alumno>());
+            Assert.Empty(db.ChangeTracker.Entries<Student>());
         }
         else
         {
@@ -384,22 +384,22 @@ public sealed class StudentLayerTests
         await connection.OpenAsync();
         await using var db = new StaticXDbContext(new DbContextOptionsBuilder<StaticXDbContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        db.Gimnasios.AddRange(new Gimnasio { Id = 1, Nombre = "First" }, new Gimnasio { Id = 2, Nombre = "Second" });
+        db.Gimnasios.AddRange(new Gym { Id = 1, Name = "First" }, new Gym { Id = 2, Name = "Second" });
         await db.SaveChangesAsync();
         var repository = new StudentRepository(db);
-        await repository.AddAsync(new Alumno { GimnasioId = 1, Nombre = "Second", Apellido = "Smith", Email = "B@EXAMPLE.COM" }, default);
-        await repository.AddAsync(new Alumno { GimnasioId = 2, Nombre = "Other", Apellido = "Smith", Email = "B@EXAMPLE.COM" }, default);
-        await repository.AddAsync(new Alumno { GimnasioId = 1, Nombre = "Third", Apellido = "Smith", Email = "C@EXAMPLE.COM" }, default);
+        await repository.AddAsync(new Student { GymId = 1, FirstName = "Second", LastName = "Smith", Email = "B@EXAMPLE.COM" }, default);
+        await repository.AddAsync(new Student { GymId = 2, FirstName = "Other", LastName = "Smith", Email = "B@EXAMPLE.COM" }, default);
+        await repository.AddAsync(new Student { GymId = 1, FirstName = "Third", LastName = "Smith", Email = "C@EXAMPLE.COM" }, default);
         db.ChangeTracker.Clear();
         Assert.Equal(new[] { 1, 3 }, (await repository.ListAsync(1, null, null, 0, 20, default)).Items.Select(s => s.Id));
         Assert.Null(await repository.FindAsync(1, 2, default));
-        Assert.Equal("Second", (await repository.FindAsync(1, 1, default))?.Nombre);
-        Assert.Empty(db.ChangeTracker.Entries<Alumno>());
+        Assert.Equal("Second", (await repository.FindAsync(1, 1, default))?.FirstName);
+        Assert.Empty(db.ChangeTracker.Entries<Student>());
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => repository.ListAsync(1, null, null, 0, 20, cancellation.Token));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => repository.FindAsync(1, 1, cancellation.Token));
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => repository.AddAsync(new Alumno(), cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => repository.AddAsync(new Student(), cancellation.Token));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => repository.UpdateAsync(1, 1, "New", "Name", "NEW@EXAMPLE.COM", cancellation.Token));
     }
 
@@ -410,21 +410,21 @@ public sealed class StudentLayerTests
         await connection.OpenAsync();
         await using var db = new StaticXDbContext(new DbContextOptionsBuilder<StaticXDbContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        db.Gimnasios.AddRange(new Gimnasio { Id = 1, Nombre = "First" }, new Gimnasio { Id = 2, Nombre = "Second" });
+        db.Gimnasios.AddRange(new Gym { Id = 1, Name = "First" }, new Gym { Id = 2, Name = "Second" });
         db.Alumnos.AddRange(
-            new Alumno { Id = 1, GimnasioId = 1, Nombre = "Ana", Apellido = "Smith", Email = "ANA@EXAMPLE.COM" },
-            new Alumno { Id = 2, GimnasioId = 1, Nombre = "Ben", Apellido = "Jones", Email = "BEN@EXAMPLE.COM" });
+            new Student { Id = 1, GymId = 1, FirstName = "Ana", LastName = "Smith", Email = "ANA@EXAMPLE.COM" },
+            new Student { Id = 2, GymId = 1, FirstName = "Ben", LastName = "Jones", Email = "BEN@EXAMPLE.COM" });
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
         var repository = new StudentRepository(db);
         Assert.Null(await repository.UpdateAsync(2, 1, "Changed", "Changed", "BEN@EXAMPLE.COM", default));
         Assert.Null(await repository.UpdateAsync(1, int.MaxValue, "Changed", "Changed", "BEN@EXAMPLE.COM", default));
         await Assert.ThrowsAsync<DuplicateStudentEmailException>(() => repository.UpdateAsync(1, 1, "Changed", "Changed", "BEN@EXAMPLE.COM", default));
-        Assert.Empty(db.ChangeTracker.Entries<Alumno>());
+        Assert.Empty(db.ChangeTracker.Entries<Student>());
         await db.SaveChangesAsync();
         var actual = await repository.FindAsync(1, 1, default);
         Assert.NotNull(actual);
-        Assert.Equal((1, 1, "Ana", "Smith", "ANA@EXAMPLE.COM"), (actual.Id, actual.GimnasioId, actual.Nombre, actual.Apellido, actual.Email));
+        Assert.Equal((1, 1, "Ana", "Smith", "ANA@EXAMPLE.COM"), (actual.Id, actual.GymId, actual.FirstName, actual.LastName, actual.Email));
         Assert.Equal(2, await db.Alumnos.CountAsync());
     }
 
@@ -439,10 +439,10 @@ public sealed class StudentLayerTests
         await using (var seed = new StaticXDbContext(options))
         {
             await seed.Database.EnsureCreatedAsync();
-            seed.Gimnasios.AddRange(new Gimnasio { Id = 1, Nombre = "First" }, new Gimnasio { Id = 2, Nombre = "Other" });
+            seed.Gimnasios.AddRange(new Gym { Id = 1, Name = "First" }, new Gym { Id = 2, Name = "Other" });
             seed.Alumnos.AddRange(
-                new Alumno { Id = 1, GimnasioId = 1, Nombre = "Ana", Apellido = "Smith", Email = "ANA@EXAMPLE.COM" },
-                new Alumno { Id = 2, GimnasioId = 2, Nombre = "Other", Apellido = "Gym", Email = "OTHER@EXAMPLE.COM" });
+                new Student { Id = 1, GymId = 1, FirstName = "Ana", LastName = "Smith", Email = "ANA@EXAMPLE.COM" },
+                new Student { Id = 2, GymId = 2, FirstName = "Other", LastName = "Gym", Email = "OTHER@EXAMPLE.COM" });
             await seed.SaveChangesAsync();
         }
         var interceptor = new DeleteBeforeSave();
@@ -452,7 +452,7 @@ public sealed class StudentLayerTests
             unchanged ? "Ana" : "Changed", "Smith", "ANA@EXAMPLE.COM", cancellation.Token));
         Assert.Equal(cancellation.Token, interceptor.Token);
         var remaining = await db.Alumnos.AsNoTracking().SingleAsync();
-        Assert.Equal((2, 2, "Other", "Gym", "OTHER@EXAMPLE.COM"), (remaining.Id, remaining.GimnasioId, remaining.Nombre, remaining.Apellido, remaining.Email));
+        Assert.Equal((2, 2, "Other", "Gym", "OTHER@EXAMPLE.COM"), (remaining.Id, remaining.GymId, remaining.FirstName, remaining.LastName, remaining.Email));
     }
 
     [Theory]
@@ -462,7 +462,7 @@ public sealed class StudentLayerTests
     {
         var repository = new StubRepository
         {
-            WriteResult = new Alumno { Id = 23, GimnasioId = 7, Nombre = "Stored", Apellido = "Name", Email = "STORED@EXAMPLE.COM", Activo = !active }
+            WriteResult = new Student { Id = 23, GymId = 7, FirstName = "Stored", LastName = "Name", Email = "STORED@EXAMPLE.COM", IsActive = !active }
         };
         var service = new StudentService(repository, TestMapper.Instance);
         var controller = new StudentsController(service)
@@ -508,15 +508,15 @@ public sealed class StudentLayerTests
         var commands = new QueryCapture();
         await using var db = new StaticXDbContext(new DbContextOptionsBuilder<StaticXDbContext>().UseSqlite(connection).AddInterceptors(commands).Options);
         await db.Database.EnsureCreatedAsync();
-        db.Gimnasios.AddRange(new Gimnasio { Id = 1, Nombre = "First" }, new Gimnasio { Id = 2, Nombre = "Other" });
+        db.Gimnasios.AddRange(new Gym { Id = 1, Name = "First" }, new Gym { Id = 2, Name = "Other" });
         await db.SaveChangesAsync();
-        Assert.True(new Alumno().Activo);
+        Assert.True(new Student().IsActive);
         var repository = new StudentRepository(db);
-        var first = await repository.AddAsync(new Alumno { GimnasioId = 1, Nombre = "Ana", Apellido = "Smith", Email = "A@EXAMPLE.COM", Activo = false }, default);
-        Assert.True(first.Activo);
-        var second = await repository.AddAsync(new Alumno { GimnasioId = 1, Nombre = "Ben", Apellido = "Jones", Email = "B@EXAMPLE.COM" }, default);
-        await repository.AddAsync(new Alumno { GimnasioId = 2, Nombre = "Other", Apellido = "Gym", Email = "A@EXAMPLE.COM" }, default);
-        Assert.False((await repository.SetActiveAsync(1, first.Id, false, default))!.Activo);
+        var first = await repository.AddAsync(new Student { GymId = 1, FirstName = "Ana", LastName = "Smith", Email = "A@EXAMPLE.COM", IsActive = false }, default);
+        Assert.True(first.IsActive);
+        var second = await repository.AddAsync(new Student { GymId = 1, FirstName = "Ben", LastName = "Jones", Email = "B@EXAMPLE.COM" }, default);
+        await repository.AddAsync(new Student { GymId = 2, FirstName = "Other", LastName = "Gym", Email = "A@EXAMPLE.COM" }, default);
+        Assert.False((await repository.SetActiveAsync(1, first.Id, false, default))!.IsActive);
         Assert.Null(await repository.SetActiveAsync(2, first.Id, false, default));
         Assert.Null(await repository.SetActiveAsync(1, int.MaxValue, false, default));
         db.ChangeTracker.Clear();
@@ -530,14 +530,14 @@ public sealed class StudentLayerTests
         Assert.Contains("ORDER BY", predicate);
         Assert.Contains("\"Id\"", predicate);
         Assert.Empty((await repository.ListAsync(2, false, null, 0, 20, default)).Items);
-        Assert.False((await repository.FindAsync(1, first.Id, default))!.Activo);
-        Assert.Empty(db.ChangeTracker.Entries<Alumno>());
+        Assert.False((await repository.FindAsync(1, first.Id, default))!.IsActive);
+        Assert.Empty(db.ChangeTracker.Entries<Student>());
         var updated = await repository.UpdateAsync(1, first.Id, "Updated", "Name", "NEW@EXAMPLE.COM", default);
-        Assert.False(updated!.Activo);
+        Assert.False(updated!.IsActive);
         db.ChangeTracker.Clear();
         // An omitted column exercises the relational default, independently of the CLR initializer.
         await db.Database.ExecuteSqlRawAsync("INSERT INTO Alumnos (GimnasioId, Nombre, Apellido, Email) VALUES (1, 'Default', 'Name', 'DEFAULT@EXAMPLE.COM')");
-        Assert.True((await db.Alumnos.SingleAsync(s => s.Email == "DEFAULT@EXAMPLE.COM")).Activo);
+        Assert.True((await db.Alumnos.SingleAsync(s => s.Email == "DEFAULT@EXAMPLE.COM")).IsActive);
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => repository.SetActiveAsync(1, first.Id, true, cancellation.Token));
@@ -555,8 +555,8 @@ public sealed class StudentLayerTests
         await using (var seed = new StaticXDbContext(options))
         {
             await seed.Database.EnsureCreatedAsync();
-            seed.Gimnasios.Add(new Gimnasio { Id = 1, Nombre = "Gym" });
-            seed.Alumnos.Add(new Alumno { Id = 1, GimnasioId = 1, Nombre = "Ana", Apellido = "Smith", Email = "ANA@EXAMPLE.COM", Activo = initialActive });
+            seed.Gimnasios.Add(new Gym { Id = 1, Name = "Gym" });
+            seed.Alumnos.Add(new Student { Id = 1, GymId = 1, FirstName = "Ana", LastName = "Smith", Email = "ANA@EXAMPLE.COM", IsActive = initialActive });
             await seed.SaveChangesAsync();
         }
         var interceptor = new DeleteBeforeSave();
@@ -576,8 +576,8 @@ public sealed class StudentLayerTests
         await using (var seed = new StaticXDbContext(options))
         {
             await seed.Database.EnsureCreatedAsync();
-            seed.Gimnasios.Add(new Gimnasio { Id = 1, Nombre = "Gym" });
-            seed.Alumnos.Add(new Alumno { Id = 1, GimnasioId = 1, Nombre = "Ana", Apellido = "Smith", Email = "ANA@EXAMPLE.COM" });
+            seed.Gimnasios.Add(new Gym { Id = 1, Name = "Gym" });
+            seed.Alumnos.Add(new Student { Id = 1, GymId = 1, FirstName = "Ana", LastName = "Smith", Email = "ANA@EXAMPLE.COM" });
             await seed.SaveChangesAsync();
         }
         var interceptor = new EditFichaBeforeStateSave();
@@ -585,10 +585,10 @@ public sealed class StudentLayerTests
         var returned = await new StudentRepository(db).SetActiveAsync(1, 1, false, default);
         Assert.NotNull(returned);
         var actual = await db.Alumnos.AsNoTracking().SingleAsync();
-        Assert.Equal(("Concurrent", "Edit", "CONCURRENT@EXAMPLE.COM", false), (actual.Nombre, actual.Apellido, actual.Email, actual.Activo));
-        Assert.Equal((actual.Id, actual.GimnasioId, actual.Nombre, actual.Apellido, actual.Email, actual.Activo),
-            (returned.Id, returned.GimnasioId, returned.Nombre, returned.Apellido, returned.Email, returned.Activo));
-        Assert.Equal(new[] { "Activo" }, interceptor.ModifiedProperties);
+        Assert.Equal(("Concurrent", "Edit", "CONCURRENT@EXAMPLE.COM", false), (actual.FirstName, actual.LastName, actual.Email, actual.IsActive));
+        Assert.Equal((actual.Id, actual.GymId, actual.FirstName, actual.LastName, actual.Email, actual.IsActive),
+            (returned.Id, returned.GymId, returned.FirstName, returned.LastName, returned.Email, returned.IsActive));
+        Assert.Equal(new[] { nameof(Student.IsActive) }, interceptor.ModifiedProperties);
     }
 
     [Theory]
@@ -603,8 +603,8 @@ public sealed class StudentLayerTests
         await using (var seed = new StaticXDbContext(options))
         {
             await seed.Database.EnsureCreatedAsync();
-            seed.Gimnasios.AddRange(new Gimnasio { Id = 1, Nombre = "Gym" }, new Gimnasio { Id = 2, Nombre = "Other" });
-            seed.Alumnos.Add(new Alumno { Id = 1, GimnasioId = 1, Nombre = "Ana", Apellido = "Smith", Email = "ANA@EXAMPLE.COM" });
+            seed.Gimnasios.AddRange(new Gym { Id = 1, Name = "Gym" }, new Gym { Id = 2, Name = "Other" });
+            seed.Alumnos.Add(new Student { Id = 1, GymId = 1, FirstName = "Ana", LastName = "Smith", Email = "ANA@EXAMPLE.COM" });
             await seed.SaveChangesAsync();
         }
         using var cancellation = new CancellationTokenSource();
@@ -627,7 +627,7 @@ public sealed class StudentLayerTests
         {
             Assert.NotNull(persisted);
             Assert.Equal((1, scenario == "other-gym" ? 2 : 1, "Ana", "Smith", "ANA@EXAMPLE.COM", false),
-                (persisted.Id, persisted.GimnasioId, persisted.Nombre, persisted.Apellido, persisted.Email, persisted.Activo));
+                (persisted.Id, persisted.GymId, persisted.FirstName, persisted.LastName, persisted.Email, persisted.IsActive));
         }
     }
 
@@ -646,9 +646,9 @@ public sealed class StudentLayerTests
         public override async ValueTask<int> SavedChangesAsync(SaveChangesCompletedEventData eventData, int result, CancellationToken cancellationToken = default)
         {
             Token = cancellationToken;
-            var query = eventData.Context!.Set<Alumno>().Where(s => s.Id == 1 && s.GimnasioId == 1);
+            var query = eventData.Context!.Set<Student>().Where(s => s.Id == 1 && s.GymId == 1);
             if (scenario == "deleted") await query.ExecuteDeleteAsync(cancellationToken);
-            else if (scenario == "other-gym") await query.ExecuteUpdateAsync(setters => setters.SetProperty(s => s.GimnasioId, 2), cancellationToken);
+            else if (scenario == "other-gym") await query.ExecuteUpdateAsync(setters => setters.SetProperty(s => s.GymId, 2), cancellationToken);
             else cancellation.Cancel();
             return result;
         }
@@ -660,9 +660,9 @@ public sealed class StudentLayerTests
         public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
         {
             var db = eventData.Context!;
-            ModifiedProperties = db.ChangeTracker.Entries<Alumno>().Single().Properties.Where(p => p.IsModified).Select(p => p.Metadata.Name).ToArray();
-            await db.Set<Alumno>().Where(s => s.Id == 1 && s.GimnasioId == 1).ExecuteUpdateAsync(setters => setters
-                .SetProperty(s => s.Nombre, "Concurrent").SetProperty(s => s.Apellido, "Edit").SetProperty(s => s.Email, "CONCURRENT@EXAMPLE.COM"), cancellationToken);
+            ModifiedProperties = db.ChangeTracker.Entries<Student>().Single().Properties.Where(p => p.IsModified).Select(p => p.Metadata.Name).ToArray();
+            await db.Set<Student>().Where(s => s.Id == 1 && s.GymId == 1).ExecuteUpdateAsync(setters => setters
+                .SetProperty(s => s.FirstName, "Concurrent").SetProperty(s => s.LastName, "Edit").SetProperty(s => s.Email, "CONCURRENT@EXAMPLE.COM"), cancellationToken);
             return result;
         }
     }
@@ -685,7 +685,7 @@ public sealed class StudentLayerTests
         public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
         {
             Token = cancellationToken;
-            await eventData.Context!.Set<Alumno>().Where(s => s.Id == 1 && s.GimnasioId == 1).ExecuteDeleteAsync(cancellationToken);
+            await eventData.Context!.Set<Student>().Where(s => s.Id == 1 && s.GymId == 1).ExecuteDeleteAsync(cancellationToken);
             return result;
         }
     }
@@ -725,48 +725,48 @@ public sealed class StudentLayerTests
         public int Offset { get; private set; }
         public int PageSize { get; private set; }
         public bool? Active { get; private set; }
-        public Task<Alumno?> SetActiveAsync(int gimnasioId, int studentId, bool active, CancellationToken cancellationToken)
+        public Task<Student?> SetActiveAsync(int gimnasioId, int studentId, bool active, CancellationToken cancellationToken)
         {
             Calls++;
             Gym = gimnasioId;
             Id = studentId;
             Active = active;
             Token = cancellationToken;
-            return Failure is null ? Task.FromResult<Alumno?>(Missing ? null : WriteResult ?? new Alumno { Id = studentId, GimnasioId = gimnasioId, Activo = active }) : Task.FromException<Alumno?>(Failure);
+            return Failure is null ? Task.FromResult<Student?>(Missing ? null : WriteResult ?? new Student { Id = studentId, GymId = gimnasioId, IsActive = active }) : Task.FromException<Student?>(Failure);
         }
-        public Task<Alumno?> UpdateAsync(int gimnasioId, int studentId, string nombre, string apellido, string email, CancellationToken cancellationToken)
+        public Task<Student?> UpdateAsync(int gimnasioId, int studentId, string nombre, string apellido, string email, CancellationToken cancellationToken)
         {
             Calls++;
             Gym = gimnasioId;
             Id = studentId;
             Token = cancellationToken;
-            Added = new Alumno { Id = studentId, GimnasioId = gimnasioId, Nombre = nombre, Apellido = apellido, Email = email };
-            return Failure is null ? Task.FromResult<Alumno?>(Missing ? null : WriteResult ?? Added) : Task.FromException<Alumno?>(Failure);
+            Added = new Student { Id = studentId, GymId = gimnasioId, FirstName = nombre, LastName = apellido, Email = email };
+            return Failure is null ? Task.FromResult<Student?>(Missing ? null : WriteResult ?? Added) : Task.FromException<Student?>(Failure);
         }
-        public Alumno? Added { get; private set; }
+        public Student? Added { get; private set; }
         public CancellationToken Token { get; private set; }
         public int Gym { get; private set; }
         public int Id { get; private set; }
         public int Calls { get; private set; }
         public Exception? Failure { get; set; }
         public bool Missing { get; set; }
-        public Alumno? WriteResult { get; init; }
-        public IReadOnlyList<Alumno> Rows { get; set; } = Array.Empty<Alumno>();
-        public Task<Alumno> AddAsync(Alumno student, CancellationToken cancellationToken)
+        public Student? WriteResult { get; init; }
+        public IReadOnlyList<Student> Rows { get; set; } = Array.Empty<Student>();
+        public Task<Student> AddAsync(Student student, CancellationToken cancellationToken)
         {
             Calls++;
             Added = student;
             student.Id = 23;
             Token = cancellationToken;
-            return Failure is null ? Task.FromResult(WriteResult ?? student) : Task.FromException<Alumno>(Failure);
+            return Failure is null ? Task.FromResult(WriteResult ?? student) : Task.FromException<Student>(Failure);
         }
-        public Task<Alumno?> FindAsync(int gimnasioId, int studentId, CancellationToken cancellationToken)
+        public Task<Student?> FindAsync(int gimnasioId, int studentId, CancellationToken cancellationToken)
         {
             Calls++;
             Gym = gimnasioId;
             Id = studentId;
             Token = cancellationToken;
-            return Task.FromResult(Rows.SingleOrDefault(student => student.Id == studentId && student.GimnasioId == gimnasioId));
+            return Task.FromResult(Rows.SingleOrDefault(student => student.Id == studentId && student.GymId == gimnasioId));
         }
         public Task<StudentPage> ListAsync(int gimnasioId, bool? activo, string? search, int offset, int pageSize, CancellationToken cancellationToken)
         {

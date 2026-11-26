@@ -31,7 +31,7 @@ public sealed class StudentPaginationTests
         var page = await repository.ListAsync(1, false, "ANA", 1, 1, cancellation.Token);
         Assert.Equal(2, page.TotalCount);
         Assert.Equal(3, Assert.Single(page.Items).Id);
-        Assert.Empty(db.ChangeTracker.Entries<Alumno>());
+        Assert.Empty(db.ChangeTracker.Entries<Student>());
         Assert.Equal(2, capture.Commands.Count);
         Assert.All(capture.Tokens, token => Assert.Equal(cancellation.Token, token));
         var count = capture.Commands[0];
@@ -137,15 +137,15 @@ public sealed class StudentPaginationTests
     private static async Task SeedAsync(StaticXDbContext db)
     {
         await db.Database.EnsureCreatedAsync();
-        db.Gimnasios.AddRange(new Gimnasio { Id = 1, Nombre = "Own" }, new Gimnasio { Id = 2, Nombre = "Other" });
+        db.Gimnasios.AddRange(new Gym { Id = 1, Name = "Own" }, new Gym { Id = 2, Name = "Other" });
         db.Alumnos.AddRange(
-            new Alumno { Id = 1, GimnasioId = 1, Nombre = "aNa", Apellido = "First", Email = "FIRST@EXAMPLE.COM" },
-            new Alumno { Id = 2, GimnasioId = 1, Nombre = "Other", Apellido = "Ana Surname", Email = "SECOND@EXAMPLE.COM", Activo = false },
-            new Alumno { Id = 3, GimnasioId = 1, Nombre = "Other", Apellido = "Third", Email = "ANA-MAIL-TOKEN@EXAMPLE.COM", Activo = false },
-            new Alumno { Id = 4, GimnasioId = 1, Nombre = "100%", Apellido = "Fourth", Email = "FOURTH@EXAMPLE.COM" },
-            new Alumno { Id = 5, GimnasioId = 1, Nombre = "Under_score", Apellido = "Fifth", Email = "FIFTH@EXAMPLE.COM" },
-            new Alumno { Id = 6, GimnasioId = 1, Nombre = "O'Neil", Apellido = "Sixth", Email = "SIXTH@EXAMPLE.COM" },
-            new Alumno { Id = 7, GimnasioId = 2, Nombre = "Ana 100% Under_score O'Neil", Apellido = "Ana Surname", Email = "ANA-MAIL-TOKEN@EXAMPLE.COM", Activo = false });
+            new Student { Id = 1, GymId = 1, FirstName = "aNa", LastName = "First", Email = "FIRST@EXAMPLE.COM" },
+            new Student { Id = 2, GymId = 1, FirstName = "Other", LastName = "Ana Surname", Email = "SECOND@EXAMPLE.COM", IsActive = false },
+            new Student { Id = 3, GymId = 1, FirstName = "Other", LastName = "Third", Email = "ANA-MAIL-TOKEN@EXAMPLE.COM", IsActive = false },
+            new Student { Id = 4, GymId = 1, FirstName = "100%", LastName = "Fourth", Email = "FOURTH@EXAMPLE.COM" },
+            new Student { Id = 5, GymId = 1, FirstName = "Under_score", LastName = "Fifth", Email = "FIFTH@EXAMPLE.COM" },
+            new Student { Id = 6, GymId = 1, FirstName = "O'Neil", LastName = "Sixth", Email = "SIXTH@EXAMPLE.COM" },
+            new Student { Id = 7, GymId = 2, FirstName = "Ana 100% Under_score O'Neil", LastName = "Ana Surname", Email = "ANA-MAIL-TOKEN@EXAMPLE.COM", IsActive = false });
         await db.SaveChangesAsync();
     }
 

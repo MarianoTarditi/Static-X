@@ -22,23 +22,24 @@ public sealed class MappingTests
     }
 
     [Fact]
-    public void Profiles_ContainOnlyElevenExplicitPersistedResultToResponseMapsInBll()
+    public void Profiles_ContainOnlyTwelveExplicitPersistedResultToResponseMapsInBll()
     {
         // Test-only configuration inspection prevents accidental reverse, request, or Identity maps.
         var maps = TestMapper.Configuration.Internal().GetAllTypeMaps();
-        Assert.Equal(11, maps.Count);
+        Assert.Equal(12, maps.Count);
+        Assert.Contains(maps, map => map.SourceType == typeof(LibraryVideo) && map.DestinationType == typeof(VideoResponse));
         Assert.Contains(maps, map => map.SourceType == typeof(DashboardStudentCounts) && map.DestinationType == typeof(DashboardStudentsResponse));
         Assert.Contains(maps, map => map.SourceType == typeof(Payment) && map.DestinationType == typeof(PaymentResponse));
         Assert.Contains(maps, map => map.SourceType == typeof(GymPassPrice) && map.DestinationType == typeof(PassPriceResponse));
         Assert.Contains(maps, map => map.SourceType == typeof(TrainerAccountProjection) && map.DestinationType == typeof(TrainerResponse));
-        Assert.Contains(maps, map => map.SourceType == typeof(Alumno) && map.DestinationType == typeof(StudentResponse));
+        Assert.Contains(maps, map => map.SourceType == typeof(Student) && map.DestinationType == typeof(StudentResponse));
         Assert.Contains(maps, map => map.SourceType == typeof(Account) && map.DestinationType == typeof(AccountResponse));
         Assert.Contains(maps, map => map.SourceType == typeof(Account) && map.DestinationType == typeof(PendingAdministratorResponse));
-        Assert.Contains(maps, map => map.SourceType == typeof(Gimnasio) && map.DestinationType == typeof(GymResponse));
+        Assert.Contains(maps, map => map.SourceType == typeof(Gym) && map.DestinationType == typeof(GymResponse));
         Assert.Contains(maps, map => map.SourceType == typeof(StudentRoutine) && map.DestinationType == typeof(RoutineResponse));
         Assert.Contains(maps, map => map.SourceType == typeof(StudentRoutineDay) && map.DestinationType == typeof(RoutineDayResponse));
         Assert.Contains(maps, map => map.SourceType == typeof(StudentRoutineExercise) && map.DestinationType == typeof(RoutineExerciseResponse));
-        Assert.All(new[] { typeof(StudentProfile), typeof(AccountProfile), typeof(GymProfile), typeof(PaymentProfile), typeof(RoutineProfile), typeof(DashboardProfile) }, profile =>
+        Assert.All(new[] { typeof(StudentProfile), typeof(AccountProfile), typeof(GymProfile), typeof(PaymentProfile), typeof(RoutineProfile), typeof(DashboardProfile), typeof(VideoProfile) }, profile =>
         {
             Assert.Same(typeof(StudentService).Assembly, profile.Assembly);
             Assert.Equal("BLL.Mappings", profile.Namespace);
@@ -51,17 +52,17 @@ public sealed class MappingTests
     [InlineData(true)]
     public void StudentProfile_MapsAllConstructorFieldsWithoutNormalizingOrExposingGym(bool active)
     {
-        var source = new Alumno { Id = 43, GimnasioId = 97, Nombre = " First name ", Apellido = " Last name ", Email = " Mixed@Example.com ", Activo = active };
+        var source = new Student { Id = 43, GymId = 97, FirstName = " First name ", LastName = " Last name ", Email = " Mixed@Example.com ", IsActive = active };
         var result = TestMapper.Instance.Map<StudentResponse>(source);
 
         Assert.Equal((43, " First name ", " Last name ", " Mixed@Example.com "),
             (result.Id, result.Nombre, result.Apellido, result.Email));
         Assert.Equal(active, result.Activo);
-        Assert.Equal(active, source.Activo);
+        Assert.Equal(active, source.IsActive);
         Assert.Equal(new[] { "Activo", "Apellido", "Email", "Id", "Nombre" }, typeof(StudentResponse).GetProperties().Select(property => property.Name).Order());
         Assert.All(typeof(StudentResponse).GetProperties(), property => Assert.Null(property.SetMethod));
         Assert.Equal((43, 97, " First name ", " Last name ", " Mixed@Example.com "),
-            (source.Id, source.GimnasioId, source.Nombre, source.Apellido, source.Email));
+            (source.Id, source.GymId, source.FirstName, source.LastName, source.Email));
     }
 
     [Fact]
@@ -77,7 +78,7 @@ public sealed class MappingTests
     [Fact]
     public void GymProfile_MapsReadOnlyConstructorFieldsWithoutTrimming()
     {
-        var result = TestMapper.Instance.Map<GymResponse>(new Gimnasio { Id = 61, Nombre = " Persisted gym " });
+        var result = TestMapper.Instance.Map<GymResponse>(new Gym { Id = 61, Name = " Persisted gym " });
 
         Assert.Equal((61, " Persisted gym "), (result.Id, result.Nombre));
         Assert.All(typeof(GymResponse).GetProperties(), property => Assert.Null(property.SetMethod));
@@ -111,39 +112,42 @@ public sealed class MappingTests
         Assert.Equal(new[] { "opaque", "second" }, items.Select(i => i.AccountId));
         Assert.Equal(new[] { "AccountId", "Email", "EmailConfirmed", "IsEnabled" }, typeof(TrainerResponse).GetProperties().Select(p => p.Name).Order());
         Assert.All(typeof(TrainerResponse).GetProperties(), p => Assert.Null(p.SetMethod));
-        Assert.Throws<AutoMapperMappingException>(() => TestMapper.Instance.Map<TrainerResponse>(new GymAccount()));
+        Assert.Throws<AutoMapperMappingException>(() => TestMapper.Instance.Map<TrainerResponse>(new IdentityAccount()));
         Assert.Throws<AutoMapperMappingException>(() => TestMapper.Instance.Map<TrainerAccountProjection>(result));
     }
 
     [Fact]
     public void Profiles_NullEntitiesRemainNull_AndStudentArraysPreserveOrderAndEmptyResults()
     {
-        Assert.Null(TestMapper.Instance.Map<StudentResponse>((Alumno?)null));
+        Assert.Null(TestMapper.Instance.Map<StudentResponse>((Student?)null));
         Assert.Null(TestMapper.Instance.Map<AccountResponse>((Account?)null));
-        Assert.Null(TestMapper.Instance.Map<GymResponse>((Gimnasio?)null));
+        Assert.Null(TestMapper.Instance.Map<GymResponse>((Gym?)null));
         var result = TestMapper.Instance.Map<StudentResponse[]>(new[]
         {
-            new Alumno { Id = 91, Nombre = "Zoe", Apellido = "West", Email = "Z@EXAMPLE.COM" },
-            new Alumno { Id = 12, Nombre = "Amy", Apellido = "East", Email = "A@EXAMPLE.COM" }
+            new Student { Id = 91, FirstName = "Zoe", LastName = "West", Email = "Z@EXAMPLE.COM" },
+            new Student { Id = 12, FirstName = "Amy", LastName = "East", Email = "A@EXAMPLE.COM" }
         });
 
         Assert.Equal(new[] { (91, "Zoe", "West", "Z@EXAMPLE.COM"), (12, "Amy", "East", "A@EXAMPLE.COM") },
             result.Select(student => (student.Id, student.Nombre, student.Apellido, student.Email)));
-        Assert.Empty(TestMapper.Instance.Map<StudentResponse[]>(Array.Empty<Alumno>()));
+        Assert.Empty(TestMapper.Instance.Map<StudentResponse[]>(Array.Empty<Student>()));
     }
 
     [Fact]
     public void Profiles_DoNotMapRequestsReverseResponsesOrIdentityCredentials()
     {
         var mapper = TestMapper.Instance;
-        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<Alumno>(new StudentResponse(1, "Name", "Surname", "a@example.com", true)));
+        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<LibraryVideo>(
+            new VideoResponse(Guid.NewGuid(), Guid.NewGuid(), "Video", "exercise", null, 42)));
+        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<LibraryVideo>(new CreateVideoRequest()));
+        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<Student>(new StudentResponse(1, "Name", "Surname", "a@example.com", true)));
         Assert.Throws<AutoMapperMappingException>(() => mapper.Map<Account>(new AccountResponse("id", 2, "a@example.com", AccountRole.Student)));
-        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<Gimnasio>(new GymResponse(3, "Gym")));
-        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<Alumno>(new CreateStudentRequest()));
-        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<Alumno>(new UpdateStudentRequest()));
-        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<GymAccount>(new CreateAccountRequest("a@example.com", "not-a-real-password")));
-        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<AccountResponse>(new GymAccount { PasswordHash = "not-a-real-hash", SecurityStamp = "not-a-real-stamp" }));
+        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<Gym>(new GymResponse(3, "Gym")));
+        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<Student>(new CreateStudentRequest()));
+        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<Student>(new UpdateStudentRequest()));
+        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<IdentityAccount>(new CreateAccountRequest("a@example.com", "not-a-real-password")));
+        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<AccountResponse>(new IdentityAccount { PasswordHash = "not-a-real-hash", SecurityStamp = "not-a-real-stamp" }));
         Assert.Throws<AutoMapperMappingException>(() => mapper.Map<Account>(new PendingAdministratorResponse("id", "a@example.invalid")));
-        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<PendingAdministratorResponse>(new GymAccount { PasswordHash = "private" }));
+        Assert.Throws<AutoMapperMappingException>(() => mapper.Map<PendingAdministratorResponse>(new IdentityAccount { PasswordHash = "private" }));
     }
 }

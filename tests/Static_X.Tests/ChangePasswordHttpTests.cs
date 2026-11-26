@@ -164,7 +164,7 @@ public sealed partial class AccountHttpTests
         Assert.True(before == await app.LogoutStateAsync(), "Anonymous request must not mutate state.");
     }
 
-    private static async Task<Dictionary<string, GymAccount>> ReadPasswordAccountsAsync(TestApp app)
+    private static async Task<Dictionary<string, IdentityAccount>> ReadPasswordAccountsAsync(TestApp app)
     {
         using var scope = app.Factory.Services.CreateScope();
         return await scope.ServiceProvider.GetRequiredService<StaticXDbContext>().Users.AsNoTracking().ToDictionaryAsync(u => u.Id);

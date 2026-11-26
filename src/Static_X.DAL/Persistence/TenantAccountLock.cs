@@ -8,5 +8,5 @@ public static class TenantAccountLock
 {
     public static Task<int> AcquireAsync(StaticXDbContext context, int gymId, CancellationToken cancellationToken) =>
         context.Gimnasios.Where(g => g.Id == gymId)
-            .ExecuteUpdateAsync(s => s.SetProperty(g => g.Nombre, g => g.Nombre), cancellationToken);
+            .ExecuteUpdateAsync(s => s.SetProperty(g => g.Name, g => g.Name), cancellationToken);
 }

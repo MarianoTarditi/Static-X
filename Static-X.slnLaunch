@@ -1,0 +1,41 @@
+[
+  {
+    "Name": "Static-X - API + Web",
+    "Projects": [
+      {
+        "Path": "src\\Static_X.API\\Static_X.API.csproj",
+        "Action": "Start"
+      },
+      {
+        "Path": "src\\Static_X.Web\\Static_X.Web.esproj",
+        "Action": "Start"
+      }
+    ]
+  },
+  {
+    "Name": "Static-X - API only",
+    "Projects": [
+      {
+        "Path": "src\\Static_X.API\\Static_X.API.csproj",
+        "Action": "Start"
+      },
+      {
+        "Path": "src\\Static_X.Web\\Static_X.Web.esproj",
+        "Action": "None"
+      }
+    ]
+  },
+  {
+    "Name": "Static-X - Web only",
+    "Projects": [
+      {
+        "Path": "src\\Static_X.API\\Static_X.API.csproj",
+        "Action": "None"
+      },
+      {
+        "Path": "src\\Static_X.Web\\Static_X.Web.esproj",
+        "Action": "Start"
+      }
+    ]
+  }
+]

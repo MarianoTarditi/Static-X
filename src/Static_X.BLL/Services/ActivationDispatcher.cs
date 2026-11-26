@@ -51,8 +51,8 @@ public sealed class ActivationDispatcher : IActivationDispatcher
         var accepted = false;
         try
         {
-            accepted = await senderClient.SendAsync("activation/" + delivery.JobId.ToString("N"),
-                sender ?? string.Empty, delivery.Email, link, cancellationToken);
+            accepted = await senderClient.SendAsync("activation/" + delivery.OutboxEntryId.ToString("N"),
+                sender ?? string.Empty, delivery.RecipientEmail, link, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception) { /* Unknown acceptance: retry with the same provider idempotency key. */ }

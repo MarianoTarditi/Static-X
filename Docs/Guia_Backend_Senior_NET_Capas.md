@@ -14,7 +14,7 @@ El frontend puede estar desarrollado en React y se comunica con el backend media
 
 Definí las entidades, enumeraciones y tipos que representan los conceptos del sistema. Las entidades pueden encapsular reglas e invariantes propias de su estado cuando corresponda, mientras que BLL coordina las operaciones de negocio.
 
-Mantenga Entity independiente de los proyectos API, BLL y DAL. `Account` y `AccountRole` son modelos puros del dominio. Por decisión explícita, `GymAccount : IdentityUser` también pertenece a Entity y conserva su herencia y comportamiento de autenticación: es una excepción deliberada a la independencia de frameworks, mediante `Microsoft.AspNetCore.App`. No se autoriza introducir EF Core, contratos HTTP ni proveedores externos en Entity. `ActivationDelivery` es un tipo de entrega no persistido. Configure EF Core mediante Fluent API en DAL sin introducir atributos de persistencia innecesarios en las entidades.
+Mantenga Entity independiente de los proyectos API, BLL y DAL. `Account` y `AccountRole` son modelos puros del dominio. Por decisión explícita, `IdentityAccount : IdentityUser` también pertenece a Entity y conserva su herencia y comportamiento de autenticación: es una excepción deliberada a la independencia de frameworks, mediante `Microsoft.AspNetCore.App`. No se autoriza introducir EF Core, contratos HTTP ni proveedores externos en Entity. `ActivationDelivery` es un tipo de entrega no persistido. Configure EF Core mediante Fluent API en DAL sin introducir atributos de persistencia innecesarios en las entidades.
 
 No uses ENTITY como una carpeta genérica para cualquier clase compartida. Los contratos de entrada y salida de la API deben estar separados de las entidades persistidas.
 
@@ -40,7 +40,7 @@ Por decisión explícita, BLL utiliza perfiles de AutoMapper en `Mappings`, sepa
 
 ### API: presentación HTTP y configuración
 
-Implemente los controladores, validación y traducción de estados HTTP, autenticación, políticas de autorización, middleware, documentación y composición en `src/Static_X.API`; los DTO específicos y el mapeo de entidades de negocio pertenecen a BLL. La autenticación, Identity y la composición pueden utilizar legítimamente `GymAccount` y enumeraciones de roles, sin habilitar mapeos de entidades de negocio en controladores. Ubique autenticación en `Auth`, el proceso automático de entrega en `Integrations` y adaptadores externos como Resend en `Integrations/Email`. La provisión y reemisión de invitaciones se autorizan exclusivamente por HTTP para SuperAdmin; no se permiten comandos terminales ni transporte local de invitaciones. Consulte la excepción global y sus controles en `BackendArchitecture.md`.
+Implemente los controladores, validación y traducción de estados HTTP, autenticación, políticas de autorización, middleware, documentación y composición en `src/Static_X.API`; los DTO específicos y el mapeo de entidades de negocio pertenecen a BLL. La autenticación, Identity y la composición pueden utilizar legítimamente `IdentityAccount` y enumeraciones de roles, sin habilitar mapeos de entidades de negocio en controladores. Ubique autenticación en `Auth`, el proceso automático de entrega en `Integrations` y adaptadores externos como Resend en `Integrations/Email`. La provisión y reemisión de invitaciones se autorizan exclusivamente por HTTP para SuperAdmin; no se permiten comandos terminales ni transporte local de invitaciones. Consulte la excepción global y sus controles en `BackendArchitecture.md`.
 
 Mantené los controladores breves: reciben la solicitud, verifican sus condiciones de transporte, delegan en BLL y traducen el resultado a una respuesta HTTP coherente. No accedas a repositorios o al `DbContext` desde un controlador.
 
@@ -50,7 +50,7 @@ Usá `Program.cs`, o extensiones de registro invocadas desde él, como punto de 
 
 | Proyecto | Dependencias permitidas |
 | --- | --- |
-| Entity | Ninguno de los otros proyectos. Referencia explícita a ASP.NET Core para `GymAccount : IdentityUser`; sin EF Core ni proveedores externos. |
+| Entity | Ninguno de los otros proyectos. Referencia explícita a ASP.NET Core para `IdentityAccount : IdentityUser`; sin EF Core ni proveedores externos. |
 | BLL | ENTITY, sus interfaces e interfaces de repositorio de DAL; nunca implementaciones DAL ni DbContext. |
 | DAL | ENTITY y sus propios contratos; nunca BLL. |
 | API | BLL; DAL para composición y adaptadores Identity; ENTITY cuando sea necesario. Aloja integraciones externas. |

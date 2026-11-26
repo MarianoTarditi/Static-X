@@ -218,7 +218,7 @@ public sealed partial class AccountHttpTests
                 (await app.LoginAsync(client, gym, "locked@example.com", "WrongPassword1!")).StatusCode);
 
         using var scope = app.Factory.Services.CreateScope();
-        var users = scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
         var user = await users.FindByIdAsync(account.Id);
         Assert.NotNull(user);
         Assert.True(await users.IsLockedOutAsync(user));
@@ -264,7 +264,7 @@ public sealed partial class AccountHttpTests
 
         using (var scope = app.Factory.Services.CreateScope())
         {
-            var users = scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
             var user = await users.FindByIdAsync(account.Id);
             Assert.NotNull(user);
             user.Role = AccountRole.Trainer;
@@ -289,7 +289,7 @@ public sealed partial class AccountHttpTests
 
         using (var scope = app.Factory.Services.CreateScope())
         {
-            var users = scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
             var user = await users.FindByIdAsync(account.Id);
             Assert.NotNull(user);
             user.EmailConfirmed = false;
@@ -425,7 +425,7 @@ public sealed partial class AccountHttpTests
         Assert.Equal(gym, persisted.GymId);
         Assert.Equal(scenario == "replay", persisted.EmailConfirmed);
         if (scenario != "replay") Assert.Null(persisted.PasswordHash);
-        else Assert.True(await verification.ServiceProvider.GetRequiredService<UserManager<GymAccount>>()
+        else Assert.True(await verification.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>()
             .CheckPasswordAsync(persisted, "StrongPassword1!"));
     }
 
@@ -479,7 +479,7 @@ public sealed partial class AccountHttpTests
             Assert.Equal(HttpStatusCode.Unauthorized, (await app.LoginAsync(client, null, "locked-global@example.com", "WrongPassword1!")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await app.LoginAsync(client, null, "locked-global@example.com", "GlobalPassword1!")).StatusCode);
         using var scope = app.Factory.Services.CreateScope();
-        var users = scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
         Assert.True(await users.IsLockedOutAsync((await users.FindByIdAsync(lockedId))!));
     }
 
@@ -714,10 +714,10 @@ public sealed partial class AccountHttpTests
         using (var scope = app.Factory.Services.CreateScope())
         {
             var context = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
-            context.Users.Add(new GymAccount { Id = "opaque-pending", UserName = "opaque-pending", GymId = first,
+            context.Users.Add(new IdentityAccount { Id = "opaque-pending", UserName = "opaque-pending", GymId = first,
                 Role = AccountRole.GymAdmin, Email = "pending@example.invalid", NormalizedEmail = "PENDING@EXAMPLE.INVALID",
                 SecurityStamp = "unchanged-stamp", ConcurrencyStamp = "unchanged-concurrency" });
-            context.ProvisioningRequests.Add(new ProvisioningRequest { Key = "query-only", GymId = first, AccountId = "opaque-pending" });
+            context.ProvisioningRequests.Add(new GymProvisioningRecord { IdempotencyKey = "query-only", GymId = first, InitialAdminAccountId = "opaque-pending" });
             await context.SaveChangesAsync();
         }
         using var client = app.Client();
@@ -814,9 +814,9 @@ public sealed partial class AccountHttpTests
         using (var scope = app.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
-            db.Users.Add(new GymAccount { Id = "advisory-account", UserName = "advisory-account", GymId = gym,
+            db.Users.Add(new IdentityAccount { Id = "advisory-account", UserName = "advisory-account", GymId = gym,
                 Role = AccountRole.GymAdmin, Email = "advisory@example.invalid", NormalizedEmail = "ADVISORY@EXAMPLE.INVALID" });
-            db.ProvisioningRequests.Add(new ProvisioningRequest { Key = "advisory-request", GymId = gym, AccountId = "advisory-account" });
+            db.ProvisioningRequests.Add(new GymProvisioningRecord { IdempotencyKey = "advisory-request", GymId = gym, InitialAdminAccountId = "advisory-account" });
             await db.SaveChangesAsync();
         }
         using var client = app.Client();
@@ -927,9 +927,9 @@ public sealed partial class AccountHttpTests
         public async Task<string> CreateGlobalAsync(string email, string password, bool confirmed = true)
         {
             using var scope = Factory.Services.CreateScope();
-            var user = new GymAccount { Id = Guid.NewGuid().ToString("N"), UserName = Guid.NewGuid().ToString("N"),
+            var user = new IdentityAccount { Id = Guid.NewGuid().ToString("N"), UserName = Guid.NewGuid().ToString("N"),
                 Email = email, Role = AccountRole.SuperAdmin, GymId = null, EmailConfirmed = confirmed, LockoutEnabled = true };
-            Assert.True((await scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>().CreateAsync(user, password)).Succeeded);
+            Assert.True((await scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>().CreateAsync(user, password)).Succeeded);
             return user.Id;
         }
 
@@ -977,7 +977,7 @@ public sealed partial class AccountHttpTests
                 .CreateAsync(gym, new CreateAccountRequest(email, password), role);
             if (confirmed)
             {
-                var users = scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>();
+                var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>();
                 var user = await users.FindByIdAsync(account.Id);
                 Assert.NotNull(user);
                 user.EmailConfirmed = true; // Simulates trusted provisioning; no public activation route exists.
@@ -1011,7 +1011,7 @@ public sealed partial class AccountHttpTests
 
         private sealed class FaultingGymRepository : IGymRepository
         {
-            public Task<Gimnasio> AddAsync(Gimnasio gym, CancellationToken cancellationToken) => throw new NotSupportedException();
+            public Task<Gym> AddAsync(Gym gym, CancellationToken cancellationToken) => throw new NotSupportedException();
             public Task<global::DAL.Repositories.Models.GymPage> ListAsync(int offset, int pageSize, CancellationToken cancellationToken) =>
                 throw new InvalidDataException("private-database-detail AspNetUsers");
             public Task<global::DAL.Repositories.Models.PendingAdministratorPage?> ListPendingAdministratorsAsync(int gymId, int offset, int pageSize, CancellationToken cancellationToken) =>

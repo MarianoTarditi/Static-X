@@ -271,7 +271,7 @@ public sealed partial class AccountHttpTests
             using var setup = app.Factory.Services.CreateScope();
             var db = setup.ServiceProvider.GetRequiredService<StaticXDbContext>();
             if (scenario == "revoked") await db.PasswordRecoveryOutbox.ExecuteUpdateAsync(s => s.SetProperty(o => o.RevokedAt, clock.GetUtcNow().UtcDateTime));
-            else Assert.True((await setup.ServiceProvider.GetRequiredService<UserManager<GymAccount>>()
+            else Assert.True((await setup.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>()
                 .ChangePasswordAsync((await db.Users.FindAsync(id))!, "CorrectPassword1!", "ChangedPassword3!")).Succeeded);
         }
         if (scenario == "null-token") token = null;

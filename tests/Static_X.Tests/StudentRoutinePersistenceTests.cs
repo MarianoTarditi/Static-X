@@ -111,6 +111,12 @@ public sealed class StudentRoutinePersistenceTests
         var tables = new[] { "StudentRoutines", "StudentRoutineDays", "StudentRoutineExercises" };
         Assert.Equal(tables, migration.UpOperations.Select(op => Assert.IsType<CreateTableOperation>(op).Name));
         Assert.Equal(tables.Reverse(), migration.DownOperations.Select(op => Assert.IsType<DropTableOperation>(op).Name));
+        var initializer = context.GetService<IModelRuntimeInitializer>();
+        var predecessor = migrations.CreateMigration(migrations.Migrations[previous], context.Database.ProviderName!);
+        Assert.Equal(migration.UpOperations.Select(OperationShape).Order(),
+            context.GetService<IMigrationsModelDiffer>().GetDifferences(
+                initializer.Initialize(predecessor.TargetModel).GetRelationalModel(),
+                initializer.Initialize(migration.TargetModel).GetRelationalModel()).Select(OperationShape).Order());
         var script = context.GetService<IMigrator>().GenerateScript(previous, current);
         foreach (var table in tables) Assert.Contains($"CREATE TABLE [{table}]", script);
         Assert.DoesNotContain("ALTER TABLE", script);
@@ -175,7 +181,7 @@ public sealed class StudentRoutinePersistenceTests
         var migrations = context.GetService<IMigrationsAssembly>();
         const string previous = "20261123000000_AddRoutineMetadata";
         const string current = "20261123010000_AddExerciseDuration";
-        Assert.Equal(new[] { previous, current }, migrations.Migrations.Keys.TakeLast(2));
+        Assert.Equal(previous, migrations.Migrations.Keys.TakeWhile(id => id != current).Last());
         Assert.False(context.Database.HasPendingModelChanges());
         var migration = migrations.CreateMigration(migrations.Migrations[current], context.Database.ProviderName!);
         Assert.Collection(migration.UpOperations,
@@ -206,7 +212,6 @@ public sealed class StudentRoutinePersistenceTests
         var previousMigration = migrations.CreateMigration(migrations.Migrations[previous], context.Database.ProviderName!);
         var previousModel = initializer.Initialize(previousMigration.TargetModel);
         var differ = context.GetService<IMigrationsModelDiffer>();
-        Assert.False(differ.HasDifferences(model.GetRelationalModel(), context.GetService<IDesignTimeModel>().Model.GetRelationalModel()));
         Assert.Equal(differ.GetDifferences(previousModel.GetRelationalModel(), model.GetRelationalModel()).Select(OperationShape).Order(),
             migration.UpOperations.Select(OperationShape).Order());
         var guard = Assert.IsType<SqlOperation>(migration.DownOperations[0]);
@@ -273,6 +278,7 @@ public sealed class StudentRoutinePersistenceTests
 
     private static string OperationShape(MigrationOperation operation) => operation switch
     {
+        CreateTableOperation table => $"Create:{table.Name}:{string.Join(",", table.Columns.Select(column => $"{column.Name}:{column.ColumnType}:{column.IsNullable}:{column.MaxLength}:{column.DefaultValue}:{column.DefaultValueSql}").Order())}:{string.Join(",", table.PrimaryKey!.Columns)}:{string.Join(";", table.CheckConstraints.Select(check => $"{check.Name}:{check.Sql}").Order())}:{string.Join(";", table.ForeignKeys.Select(key => $"{key.Name}:{string.Join(",", key.Columns)}:{key.PrincipalTable}:{string.Join(",", key.PrincipalColumns!)}:{key.OnDelete}").Order())}",
         AlterColumnOperation column => $"Alter:{column.Table}:{column.Name}:{column.ColumnType}:{column.IsNullable}:{column.OldColumn.IsNullable}",
         AddColumnOperation column => $"Add:{column.Table}:{column.Name}:{column.ColumnType}:{column.IsNullable}:{column.MaxLength}:{column.DefaultValue}:{column.DefaultValueSql}",
         DropColumnOperation column => $"Drop:{column.Table}:{column.Name}",
@@ -284,9 +290,9 @@ public sealed class StudentRoutinePersistenceTests
     private static async Task SeedAsync(StaticXDbContext db)
     {
         await db.Database.EnsureCreatedAsync();
-        db.Gimnasios.Add(new Gimnasio { Id = 1, Nombre = "First" });
-        db.Alumnos.Add(new Alumno { Id = 1, GimnasioId = 1, Nombre = "Ana", Apellido = "Student", Email = "student@example.invalid" });
-        db.Users.Add(new GymAccount
+        db.Gimnasios.Add(new Gym { Id = 1, Name = "First" });
+        db.Alumnos.Add(new Student { Id = 1, GymId = 1, FirstName = "Ana", LastName = "Student", Email = "student@example.invalid" });
+        db.Users.Add(new IdentityAccount
         {
             Id = "trainer", GymId = 1, Role = AccountRole.Trainer, IsEnabled = true,
             Email = "trainer@example.invalid", NormalizedEmail = "TRAINER@EXAMPLE.INVALID"

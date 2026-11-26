@@ -14,7 +14,7 @@ internal static class StudentRoutineConfiguration
             routine.Property(r => r.Revision).IsConcurrencyToken();
             routine.Property(r => r.Title).HasMaxLength(200);
             routine.Property(r => r.Instructions).HasMaxLength(2000);
-            routine.HasOne<Alumno>().WithOne().HasForeignKey<StudentRoutine>(r => r.StudentId)
+            routine.HasOne<Student>().WithOne().HasForeignKey<StudentRoutine>(r => r.StudentId)
                 .OnDelete(DeleteBehavior.Restrict);
             routine.HasMany(r => r.Days).WithOne().HasForeignKey(d => d.StudentId).OnDelete(DeleteBehavior.Cascade);
         });

@@ -176,7 +176,7 @@ public sealed partial class AccountHttpTests
         var context = verification.ServiceProvider.GetRequiredService<StaticXDbContext>();
         var persisted = await context.Users.SingleAsync(u => u.Id == accountId);
         Assert.Equal((role, gym, true, 3), (persisted.Role, persisted.GymId, persisted.EmailConfirmed, persisted.AccessFailedCount));
-        Assert.True(await verification.ServiceProvider.GetRequiredService<UserManager<GymAccount>>().CheckPasswordAsync(persisted, "CorrectPassword1!"));
+        Assert.True(await verification.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>().CheckPasswordAsync(persisted, "CorrectPassword1!"));
         Assert.Equal(2, await context.TenantInvitationRequests.CountAsync());
         Assert.Equal(2, await context.ActivationOutbox.CountAsync());
         Assert.All(await context.ActivationOutbox.ToListAsync(), o => Assert.Empty(o.ProtectedToken));
@@ -196,8 +196,8 @@ public sealed partial class AccountHttpTests
         if (scenario == "historical")
         {
             using var scope = app.Factory.Services.CreateScope();
-            var user = new GymAccount { Id = "historical", UserName = "historical", GymId = gym, Role = AccountRole.Student, Email = "recipient@example.invalid" };
-            Assert.True((await scope.ServiceProvider.GetRequiredService<UserManager<GymAccount>>().CreateAsync(user)).Succeeded);
+            var user = new IdentityAccount { Id = "historical", UserName = "historical", GymId = gym, Role = AccountRole.Student, Email = "recipient@example.invalid" };
+            Assert.True((await scope.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>().CreateAsync(user)).Succeeded);
         }
         else Assert.Equal(HttpStatusCode.OK, (await app.PostAsync(actor, InvitationsRoute,
             new InviteAccountRequest("original", "recipient@example.invalid", scenario == "other-role" ? AccountRole.Trainer : AccountRole.Student,
@@ -405,7 +405,7 @@ public sealed partial class AccountHttpTests
         var user = await db.Users.SingleAsync(u => u.Id == id);
         Assert.False(user.IsEnabled);
         Assert.True(user.StudentAccessSuspended);
-        Assert.False((await db.Alumnos.SingleAsync()).Activo);
+        Assert.False((await db.Alumnos.SingleAsync()).IsActive);
         if (operation == "activate") Assert.Equal(results[0].IsSuccessStatusCode, user.EmailConfirmed);
         else Assert.Null(user.PasswordHash);
         foreach (var result in results) result.Dispose();
@@ -518,7 +518,7 @@ public sealed partial class AccountHttpTests
         using var verify = app.Factory.Services.CreateScope();
         var db = verify.ServiceProvider.GetRequiredService<StaticXDbContext>();
         var user = await db.Users.SingleAsync(u => u.Id == id);
-        var hasher = verify.ServiceProvider.GetRequiredService<UserManager<GymAccount>>().PasswordHasher;
+        var hasher = verify.ServiceProvider.GetRequiredService<UserManager<IdentityAccount>>().PasswordHasher;
         Assert.Equal(1, new[] { "FirstPassword1!", "SecondPassword1!" }.Count(password =>
             hasher.VerifyHashedPassword(user, user.PasswordHash!, password) != PasswordVerificationResult.Failed));
         Assert.NotNull((await db.ActivationInvitations.SingleAsync()).ConsumedAt);
@@ -663,7 +663,7 @@ public sealed partial class AccountHttpTests
         var db = verify.ServiceProvider.GetRequiredService<StaticXDbContext>();
         Assert.Single(await db.Users.ToListAsync());
         Assert.Null((await db.Alumnos.SingleAsync()).AccountId);
-        Assert.True((await db.Alumnos.SingleAsync()).Activo);
+        Assert.True((await db.Alumnos.SingleAsync()).IsActive);
         Assert.Empty(await db.TenantInvitationRequests.ToListAsync());
         Assert.Empty(await db.ActivationInvitations.ToListAsync());
         Assert.Empty(await db.ActivationOutbox.ToListAsync());
@@ -677,10 +677,10 @@ public sealed partial class AccountHttpTests
             Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result, CancellationToken cancellationToken = default)
         {
             var db = eventData.Context!;
-            if (db.ChangeTracker.Entries<GymAccount>().Any(e => e.State == EntityState.Added && e.Entity.Role == AccountRole.Student))
+            if (db.ChangeTracker.Entries<IdentityAccount>().Any(e => e.State == EntityState.Added && e.Entity.Role == AccountRole.Student))
             {
                 // Inject a state change inside the isolated transaction to exercise the write-time predicate, not SQL Server concurrency.
-                Assert.Equal(1, await db.Set<Alumno>().ExecuteUpdateAsync(s => s.SetProperty(s => s.Activo, false), cancellationToken));
+                Assert.Equal(1, await db.Set<Student>().ExecuteUpdateAsync(s => s.SetProperty(s => s.IsActive, false), cancellationToken));
                 Applied = true;
             }
             return result;
@@ -703,7 +703,7 @@ public sealed partial class AccountHttpTests
     {
         using var scope = app.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StaticXDbContext>();
-        var student = new Alumno { GimnasioId = gym, Activo = active, Nombre = "Selected", Apellido = "Student", Email = email };
+        var student = new Student { GymId = gym, IsActive = active, FirstName = "Selected", LastName = "Student", Email = email };
         db.Alumnos.Add(student);
         await db.SaveChangesAsync();
         return student.Id;
